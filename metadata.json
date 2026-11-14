@@ -1,0 +1,8 @@
+{
+  "name": "IGNIS · Harmonized Fire Calendar",
+  "description": "IGNIS: a harmonized MODIS + VIIRS burning-activity calendar for any area, built on NASA FIRMS hotspots.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
