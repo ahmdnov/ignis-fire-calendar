@@ -241,12 +241,12 @@ export function buildActions(s: SummaryResponse, area: AreaSelection, breakdown:
 /** The chapter's answer and briefing line. */
 export function actionsInsight(actions: Action[], areaLabel: string): Insight | null {
   if (!actions.length) return null;
-  const first = actions[0];
-  const lead = first.title.charAt(0).toLowerCase() + first.title.slice(1);
+  const lead0 = actions[0];
+  const lead = lead0.title.charAt(0).toLowerCase() + lead0.title.slice(1);
   return {
     parts: [
-      b(`${actions.length} suggestion${actions.length > 1 ? 's' : ''}`), ` for ${areaLabel}, most urgent first. Start here: `, b(lead),
-      '. Each one shows the number it rests on. They come from fixed rules that know nothing about weather, staffing or local law, so use them as a checklist to discuss, and confirm on the ground before acting.',
+      b(`${actions.length} suggestion${actions.length > 1 ? 's' : ''}`), ` for ${areaLabel}, most urgent first. Each shows the number it rests on; `,
+      'confirm on the ground before acting.',
     ],
     short: ['What to do: ', b(lead), actions.length > 1 ? `, and ${actions.length - 1} more` : ''],
     facts: [],

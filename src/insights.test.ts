@@ -217,8 +217,7 @@ test('next: busier, too close to call, off season and missing outlook are worded
   };
   const up = mk(0.78, 'busier');
   assert.match(text(up), /^January 2026 is likely to be busier than usual: a 78% chance/);
-  assert.match(text(up), /the last 12 months ran 1\.6× their usual level; December 2025 came in at 1\.9× its usual/);
-  assert.match(text(up), /made 23 calls for this area and 22 came true/);
+  assert.doesNotMatch(text(up), /Why:|calls for this area/); // the cards carry the reasons and the track record
   const down = mk(0.22, 'quieter');
   assert.match(text(down), /likely to be quieter than usual: only a 22% chance of a busier month/);
   const mid = mk(0.57, 'unclear');

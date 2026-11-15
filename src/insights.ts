@@ -452,7 +452,7 @@ export function trendInsight(s: SummaryResponse): Insight {
   if (first5 > 0) parts.push('The last 5 years averaged ', b(times(last5 / first5)), ' the first 5. ');
   parts.push(
     b(`${recentInTop} of the 10`), ' biggest years came in the last decade',
-    recentInTop >= 6 ? ', so big fire years are becoming more common.' : recentInTop <= 2 ? ', so big fire years are rarer now.' : '.'
+    '.'
   );
   const weak = false;
 
@@ -542,31 +542,20 @@ export function nextInsight(s: SummaryResponse): Insight | null {
     return { parts, short, facts: [{ label: `Usual ${MONTH_NAMES[n.month - 1]}`, value: fmtNum(Math.round(n.usual)) }], weak: true };
   }
 
-  const recent =
-    n.last12Ratio >= 1.15
-      ? `the last 12 months ran ${times(n.last12Ratio)} their usual level`
-      : n.last12Ratio <= 0.87
-        ? `the last 12 months ran at ${times(n.last12Ratio)} their usual level`
-        : 'the last 12 months were close to their usual level';
-  const last = `${n.lastMonth.label} came in at ${times(n.lastMonth.ratio)} its usual`;
-
   if (n.call === 'busier') {
-    parts.push(b(n.label), ' is likely to be ', b('busier than usual'), ': a ', b(chance), ` chance. Why: ${recent}; ${last}.`);
+    parts.push(b(n.label), ' is likely to be ', b('busier than usual'), ': a ', b(chance), ` chance.`);
     short = ['Next month (', n.label, '): likely ', b('busier than usual'), ', ', b(chance), ' chance'];
   } else if (n.call === 'quieter') {
     parts.push(
-      b(n.label), ' is likely to be ', b('quieter than usual'), ': only a ', b(chance), ` chance of a busier month. Why: ${recent}; ${last}.`
+      b(n.label), ' is likely to be ', b('quieter than usual'), ': only a ', b(chance), ` chance of a busier month.`
     );
     short = ['Next month (', n.label, '): likely ', b('quieter than usual'), ', ', b(pct(1 - n.pBusier)), ' chance'];
   } else {
     parts.push(
       b('No clear signal'), ' for ', b(n.label), ': the chance of a busier-than-usual month is ', b(chance),
-      `, too close to call. Why: ${recent}; ${last}.`
+      ', too close to call.'
     );
     short = ['Next month (', n.label, '): ', b('no clear signal'), ', ', b(chance), ' chance of busier than usual'];
-  }
-  if (ts.calls >= 6) {
-    parts.push(' In ', span, ' the model made ', b(ts.calls), ' calls for this area and ', b(ts.hits), ' came true.');
   }
   facts.push({ label: 'Chance busier', value: chance });
   facts.push({ label: `Usual ${MONTH_NAMES[n.month - 1]}`, value: fmtNum(Math.round(n.usual)) });

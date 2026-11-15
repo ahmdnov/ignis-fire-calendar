@@ -42,20 +42,12 @@ export function StoryChapter({ id, n, question, insight, hint, children }: Story
           <p className="chapter__a">
             <Rich parts={insight.parts} />
           </p>
-          {(insight.facts.length > 0 || insight.weak) && (
-            <ul className="chapter__facts" aria-label="Key numbers">
-              {insight.weak && (
-                <li className="chapter__fact chapter__fact--weak">
-                  <span>Limited data</span>
-                  <b>read with care</b>
-                </li>
-              )}
-              {insight.facts.map((f) => (
-                <li key={f.label} className="chapter__fact">
-                  <span>{f.label}</span>
-                  <b>{f.value}</b>
-                </li>
-              ))}
+          {insight.weak && (
+            <ul className="chapter__facts">
+              <li className="chapter__fact chapter__fact--weak">
+                <span>Limited data</span>
+                <b>read with care</b>
+              </li>
             </ul>
           )}
           {hint && (
@@ -154,7 +146,7 @@ export function ProvinceRanking({
         PROVINCES OF {breakdown.countryName.toUpperCase()} · SAME PERIOD
       </div>
       <h3 id="ranking-title" className="ranking__title">
-        Share of the fire, and each province against its own normal
+        Provinces of {breakdown.countryName}: share of the fire, and vs their own normal
       </h3>
       <ol className="ranking__list">
         {rows.map((p, rowIdx) => {
@@ -208,13 +200,16 @@ export function ProvinceRanking({
             {expanded ? 'Show top 6' : `Show all ${provs.length} provinces`}
           </button>
         )}
-        <span className="ranking__note">
+        <details className="note">
+          <summary>Details</summary>
+          <p>
           Badge = this period vs the province’s median for the same dates in {breakdown.baselineSpan ?? 'past years'}. The
           arrow shows how it ranks among those years (▲ above, ● within normal, ▼ below).
           {' '}“Too little” = not enough fire to compare.
           {breakdown.unassignedShare >= 0.005 &&
             ` ${Math.round(breakdown.unassignedShare * 1000) / 10}% of the fire lies on coasts outside any province outline.`}
-        </span>
+          </p>
+        </details>
       </div>
     </div>
   );
@@ -256,7 +251,7 @@ export function RecordMonthsCard({ summary }: { summary: SummaryResponse }) {
           ))}
         </ol>
       )}
-      <p className="listcard__note">Hotspot-days in the month, and how that compares with the same month in a normal year.</p>
+      <details className="note"><summary>Details</summary><p>Hotspot-days in the month, and how that compares with the same month in a normal year.</p></details>
     </ListCard>
   );
 }
@@ -285,10 +280,10 @@ export function MonthsVsNormalCard({ summary, year }: { summary: SummaryResponse
           </li>
         ))}
       </ol>
-      <p className="listcard__note">
+      <details className="note"><summary>Details</summary><p>
         × = this month vs the median for that month. The label shows where it falls among past years: “In range” is the
         middle half, “Far above” is higher than 9 of every 10 years. Months that vary a lot can be 2× and still in range.
-      </p>
+      </p></details>
     </ListCard>
   );
 }
@@ -312,7 +307,7 @@ export function TopYearsCard({ summary }: { summary: SummaryResponse }) {
           </li>
         ))}
       </ol>
-      <p className="listcard__note">Hotspot-days per year. “Typical” is the median year since 2001.</p>
+      <details className="note"><summary>Details</summary><p>Hotspot-days per year. “Typical” is the median year since 2001.</p></details>
     </ListCard>
   );
 }
@@ -339,7 +334,7 @@ export function OutlookCard({ outlook }: { outlook: OutlookResponse }) {
       <div className="section-kicker" style={{ marginBottom: 4 }}>
         OUTLOOK FOR {n.label.toUpperCase()}
       </div>
-      <h3 className="listcard__title">Will it be busier than usual?</h3>
+      <h3 className="listcard__title">Will {n.label} be busier than usual?</h3>
 
       <div className="outlook__head">
         <div className={`outlook__chance outlook__chance--${n.call}`}>
@@ -394,10 +389,10 @@ export function OutlookCard({ outlook }: { outlook: OutlookResponse }) {
           <dd className="font-mono">{ratioText(n.last12Ratio)} their usual</dd>
         </div>
       </dl>
-      <p className="listcard__note">
+      <details className="note"><summary>Details</summary><p>
         “Usual” is the median for that calendar month here. The forecast uses only how recent months compared with their
         usual level: no weather data. Fire that runs above its usual level tends to stay above.
-      </p>
+      </p></details>
     </div>
   );
 }
@@ -422,7 +417,7 @@ export function OutlookTrackCard({ outlook, areaLabel }: { outlook: OutlookRespo
         TRACK RECORD · {areaLabel.toUpperCase()}
       </div>
       <h3 className="listcard__title">
-        {ts.calls > 0 ? `${ts.hits} of ${ts.calls} calls came true` : 'No calls made here'}
+        {ts.calls > 0 ? `Track record here: ${ts.hits} of ${ts.calls} calls came true` : 'No calls made here yet'}
       </h3>
 
       {years.map((y) => (
@@ -483,11 +478,11 @@ export function OutlookTrackCard({ outlook, areaLabel }: { outlook: OutlookRespo
           <b className="font-mono">{pc(sk.trainedOnRaw)}</b>
         </li>
       </ul>
-      <p className="listcard__note">
+      <details className="note"><summary>Details</summary><p>
         Each {ts.fromYear}+ forecast above was made using only earlier data, by a model that never saw {ts.fromYear} or later.
         The overall test covers {fmtNum(sk.n)} forecasts for 2016–2025, each predicted from earlier years only. The model
         matches the simple “same as last month” rule on right/wrong calls; what it adds is a chance you can rely on.
-      </p>
+      </p></details>
     </div>
   );
 }
@@ -561,20 +556,18 @@ export function ActionList({ actions, labels, onSee }: { actions: Action[]; labe
               <p className="action__why">
                 <span className="action__because">Because</span> <Rich parts={a.why} />
               </p>
-              <p className="action__who">For: {a.who}</p>
             </div>
             <button type="button" className="action__see no-print" onClick={() => onSee(a.see)}>
-              See the evidence
-              <small>{labels[a.see] ?? ''}</small>
+              <span className="sr-only">See the evidence: </span>
+              {labels[a.see] ?? 'Evidence'}
               <ArrowRight size={14} aria-hidden="true" />
             </button>
           </li>
         ))}
       </ol>
-      <p className="listcard__note">
-        A satellite hotspot is not a confirmed fire, clouds hide fires, and these suggestions do not know about weather,
-        staffing or local rules. Confirm on the ground before acting.
-      </p>
+      <details className="note"><summary>Details</summary><p>
+        Rule-based suggestions: they do not know about weather, staffing or local rules. A hotspot is not a confirmed fire.
+      </p></details>
     </div>
   );
 }

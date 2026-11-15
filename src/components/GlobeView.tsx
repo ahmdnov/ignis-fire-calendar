@@ -89,7 +89,7 @@ export function GlobeView(p: Props) {
     {reading&&<div className="earth-reading" role="status"><button aria-label="Close reading" onClick={()=>setReading(null)}>×</button><strong>{reading.properties.harmonizedCount.toLocaleString(undefined,{maximumFractionDigits:1})}</strong><span>harmonized hotspot-days</span><small>{reading.geometry.coordinates[1].toFixed(3)}°, {reading.geometry.coordinates[0].toFixed(3)}°</small></div>}
     {!p.mapData.hotspots.features.length&&<div className="earth-empty">No activity cells for this area and period.</div>}
     {failed&&<div className="earth-error" role="alert">3D rendering is unavailable on this device.<button onClick={p.onMap}>Open map</button></div>}
-    <div className="earth-key"><span style={{background:p.colorRamp==='cividis'?'linear-gradient(90deg,#00204c,#7c7b78,#ffea46)':'linear-gradient(90deg,#D9670B,#F08C12,#F9AE2B,#FFCB5C)'}}/><small>Lower activity <b>Harmonized hotspot-days</b> Higher activity</small></div>
-    <div className="earth-foot">Drag to rotate · Scroll to zoom · Click a country or activity cell<br/>Coverage: Gulf countries & Argentina · Relief: NASA Blue Marble</div>
+    <div className="earth-key"><span style={{background:p.colorRamp==='cividis'?'linear-gradient(90deg,#00204c,#7c7b78,#ffea46)':'linear-gradient(90deg,#D9670B,#F08C12,#F9AE2B,#FFCB5C)'}}/><small>Less fire <b/> More fire</small></div>
+    <div className="earth-foot">Drag to rotate · Scroll to zoom · Click a country</div>
   </section>;
 }

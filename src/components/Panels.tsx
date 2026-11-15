@@ -299,12 +299,6 @@ export function ExclusionsCard({ summary }: ExclusionsCardProps) {
         </span>
       </div>
 
-      <p style={{ margin: '0 0 14px 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)', maxWidth: '86ch' }}>
-        Satellites also see gas flares, refineries and other hot industry. Of {fmtNum(exclusions.totalRaw)} raw
-        detections in this area and period, {fmtNum(exclusions.keptVegetation)} are counted as vegetation fire. The
-        rest are removed before any counting, so oil fields do not look like wildfires.
-      </p>
-
       <div
         role="img"
         aria-label={`Of ${fmtNum(exclusions.totalRaw)} detections, ${exclusions.excludedPct}% were excluded as not vegetation fire`}
