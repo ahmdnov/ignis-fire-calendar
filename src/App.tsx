@@ -331,10 +331,17 @@ export default function App() {
     [regions]
   );
 
-  const handleAreaInputMode = useCallback((mode: AreaInputMode) => {
-    setAreaInputMode(mode);
-    if (mode === 'draw') setDisplay('map');
-  }, []);
+  const handleAreaInputMode = useCallback(
+    (mode: AreaInputMode) => {
+      setAreaInputMode(mode);
+      // Drawing happens on the map, which lives in the Where tab: open it from any tab.
+      if (mode === 'draw') {
+        setDisplay('map');
+        scrollToSection('sec-where');
+      }
+    },
+    [scrollToSection]
+  );
 
   const handleStartDrawing = useCallback(() => {
     setAreaInputMode('draw');

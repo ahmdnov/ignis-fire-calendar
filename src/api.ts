@@ -46,7 +46,7 @@ import {
  * each country and province at the three preset periods with the default baseline. Anything else
  * (drawn areas, custom dates or baseline, hotspot export) needs the full version and says so.
  */
-const STATIC = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_STATIC === '1';
+export const STATIC = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_STATIC === '1';
 const STATIC_BASELINE: [number, number] = [2001, 2025];
 const STATIC_ONLY =
   'the online demo holds precomputed results for countries and provinces at the three preset periods ' +

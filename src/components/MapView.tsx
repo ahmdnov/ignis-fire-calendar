@@ -8,6 +8,13 @@ import {
   type RasterTileSource,
 } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { setWorkerUrl } from 'maplibre-gl';
+// MapLibre runs all map data (fire cells, outlines, clicks, drawing) in a web worker that it looks
+// for next to its own file. A production build bundles MapLibre into the app, so that file is not
+// there and the map shows only its background tiles. Bundle the worker explicitly and point to it.
+import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+
+setWorkerUrl(mapWorkerUrl);
 import { Circle, Pentagon, RotateCcw, Square } from 'lucide-react';
 import type {
   AreaInputMode,

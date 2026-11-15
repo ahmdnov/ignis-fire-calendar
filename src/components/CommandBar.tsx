@@ -17,6 +17,7 @@ import type {
   RegionsResponse,
 } from '../types';
 import { fmtDateRange } from '../util';
+import { STATIC } from '../api';
 
 export type PeriodPreset = '30d' | '12m' | '5y';
 type PanelId = 'area' | 'period' | 'compare' | 'export';
@@ -223,19 +224,31 @@ export function CommandBar(p: CommandBarProps) {
                     ['draw', 'Draw on map'],
                     ['coords', 'Coordinates'],
                   ] as [AreaInputMode, string][]
-                ).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    role="tab"
-                    aria-selected={p.areaInputMode === mode}
-                    className={`segmented__btn ${p.areaInputMode === mode ? 'segmented__btn--active' : ''}`}
-                    onClick={() => p.onAreaInputMode(mode)}
-                  >
-                    {label}
-                  </button>
-                ))}
+                ).map(([mode, label]) => {
+                  // The public static site has no data server, so it cannot analyse a custom shape.
+                  const off = STATIC && mode !== 'region';
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="tab"
+                      aria-selected={p.areaInputMode === mode}
+                      aria-disabled={off || undefined}
+                      disabled={off}
+                      title={off ? 'Needs the full version with the data server (see the GitHub README)' : undefined}
+                      className={`segmented__btn ${p.areaInputMode === mode ? 'segmented__btn--active' : ''}`}
+                      onClick={() => p.onAreaInputMode(mode)}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
+              {STATIC && (
+                <p className="field-hint" style={{ margin: '-6px 0 12px 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                  Online demo: pick any country or province. Drawing an area and typing coordinates work in the full version.
+                </p>
+              )}
 
               {p.areaInputMode === 'region' && (
                 <div>

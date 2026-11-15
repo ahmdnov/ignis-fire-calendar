@@ -2750,3 +2750,8 @@ details.note > p { margin: 4px 0 0 0; max-width: 80ch; }
 @media print {
   details.note > summary { display: none; }
 }
+
+.segmented__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

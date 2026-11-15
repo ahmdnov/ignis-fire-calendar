@@ -11,6 +11,8 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    // MapLibre starts its worker as an ES module.
+    worker: { format: 'es' as const },
     optimizeDeps: {
       exclude: ['maplibre-gl'],
     },
