@@ -1,3 +1,4 @@
+import { interpolateRgb, piecewise } from 'd3';
 import type {
   AreaGeometry,
   CalendarCell,
@@ -6,6 +7,7 @@ import type {
   HotspotCellFeature,
   StatusLevel,
   SummaryResponse,
+  ThemeMode,
 } from './types';
 
 export const MONTH_NAMES = [
@@ -38,6 +40,46 @@ export const MONTH_FULL = [
   'December',
 ];
 
+/**
+ * "Fire heat" sequential ramp, low -> high. One hue family (burnt orange -> gold), monotone lightness,
+ * lowest step still >= 2:1 against the card surface. Both pass the dataviz ordinal validator
+ * (dark on #110D0B, light on #FAF7F2). Dark mode runs dark -> bright, light mode light -> dark.
+ */
+export const FIRE_STOPS: Record<ThemeMode, string[]> = {
+  dark: ['#80380F', '#AE4C0C', '#D9670B', '#F08C12', '#F9AE2B', '#FFCB5C'],
+  light: ['#EC9D22', '#E07F0E', '#C8620B', '#A64A0B', '#80370C', '#57260B'],
+};
+/** Cividis end points, for legends. */
+export const CIVIDIS_STOPS = ['#00204d', '#575c6d', '#a69d75', '#ffea46'];
+
+const fireInterp: Record<ThemeMode, (t: number) => string> = {
+  dark: piecewise(interpolateRgb, FIRE_STOPS.dark),
+  light: piecewise(interpolateRgb, FIRE_STOPS.light),
+};
+
+export function fireColor(t: number, theme: ThemeMode = 'dark'): string {
+  return fireInterp[theme](Math.max(0, Math.min(1, t)));
+}
+
+export function rampGradientCss(stops: string[]): string {
+  return `linear-gradient(90deg, ${stops.join(', ')})`;
+}
+
+/** "2 Dec 2025" from an ISO date. */
+export function fmtDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return `${d} ${MONTH_NAMES[m - 1]} ${y}`;
+}
+
+/** "2 Dec – 31 Dec 2025", or with both years when they differ. */
+export function fmtDateRange(from: string, to: string): string {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty] = to.split('-').map(Number);
+  if (!fy || !ty) return `${from} – ${to}`;
+  return fy === ty ? `${fd} ${MONTH_NAMES[fm - 1]} – ${fmtDate(to)}` : `${fmtDate(from)} – ${fmtDate(to)}`;
+}
+
 export function fmtNum(value: number, decimals = 0): string {
   if (!Number.isFinite(value)) return '—';
   return value.toLocaleString('en-US', {
@@ -60,6 +102,7 @@ export function fmtRatio(ratio: number): string {
 }
 
 export function ordinal(n: number): string {
+  if (!Number.isFinite(n)) return '—';
   const s = ['th', 'st', 'nd', 'rd'];
   const v = n % 100;
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;

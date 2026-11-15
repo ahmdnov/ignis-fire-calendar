@@ -1,5 +1,9 @@
 import type { MetaResponse } from '../types';
-import { fmtNum, gradeColor } from '../util';
+import { fmtDate, fmtNum, gradeColor } from '../util';
+
+const num = (v: number, d: number, suffix = '') => (Number.isFinite(v) ? `${v.toFixed(d)}${suffix}` : '—');
+const signed = (v: number, d: number, suffix = '') =>
+  Number.isFinite(v) ? `${v >= 0 ? '+' : ''}${v.toFixed(d)}${suffix}` : '—';
 import { SeamSmallMultiples } from '../components/Charts';
 
 interface MethodsProps {
@@ -10,32 +14,32 @@ const PIPELINE_STEPS = [
   {
     step: '01 · Ingest',
     title: 'Multi-Mission FIRMS Archive',
-    body: 'Loads daily MODIS Collection 6.1 (Terra & Aqua, 1 km) and VIIRS 375 m (S-NPP & NOAA-20) detections from 2000-11-01 through near-real-time.',
+    body: 'Loads every MODIS (Terra & Aqua, 1 km) and VIIRS 375 m (S-NPP & NOAA-20) detection from the NASA FIRMS country archive, from November 2000 onward.',
   },
   {
     step: '02 · Screen Flares',
     title: 'Industrial & Flare Masking',
-    body: 'Removes persistent oil & gas flares, refineries, steelworks, low-confidence noise, and volcanic hotspots via multi-year persistence grids.',
+    body: 'Keeps only NASA’s vegetation-fire type, drops low-confidence detections, and removes cells that stay hot for 60+ days across 6+ years (flares, refineries).',
   },
   {
     step: '03 · Spatial Join',
-    title: 'Boundary & 0.01° Grid Aggregation',
-    body: 'Indexes detections into ~1 km cells and aggregates monthly/daily totals for 177 countries, provinces, or custom polygons.',
+    title: 'One Shared Unit: Hotspot-Days',
+    body: 'Snaps detections to a 0.01° (~1 km) grid and counts each cell once per day, so one fire seen as seven VIIRS pixels is not counted seven times.',
   },
   {
     step: '04 · Overlap Fit',
     title: 'Country × Month Calibration',
-    body: 'Fits pooled cross-sensor ratios on the 2012–2017 MODIS/VIIRS overlap window with empirical-Bayes shrinkage for low-fire months.',
+    body: 'Learns a MODIS → VIIRS factor per country and month from 2012–2017, when both flew. Months with little data are pulled toward the country average.',
   },
   {
     step: '05 · Harmonize',
-    title: 'Unified 2000–2026 Series',
-    body: 'Scales historical MODIS counts into VIIRS 375 m equivalents and aligns NOAA-20 to S-NPP (k = 0.99) to eliminate the 2012 cliff.',
+    title: 'One Unified Series',
+    body: 'Scales MODIS-era counts into VIIRS S-NPP units and aligns NOAA-20 to S-NPP (k ≈ 0.99), which removes the artificial jump at 2012.',
   },
   {
     step: '06 · Validate',
     title: 'Leave-One-Year-Out CV',
-    body: 'Grades every region by held-out annual WAPE and seam bias, surfacing uncertainty whiskers directly on MODIS-era bars.',
+    body: 'Hides one year at a time, predicts it from the others, and reports the error. Every area gets a grade, and MODIS-era bars carry error whiskers.',
   },
 ];
 
@@ -45,7 +49,8 @@ export function Methods({ meta }: MethodsProps) {
       style={{
         maxWidth: 1400,
         margin: '0 auto',
-        padding: '32px 28px 64px',
+        padding: '28px clamp(12px, 2vw, 28px) 64px',
+        width: '100%',
         display: 'flex',
         flexDirection: 'column',
         gap: 26,
@@ -70,9 +75,10 @@ export function Methods({ meta }: MethodsProps) {
         </h1>
         <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: 'var(--text-secondary)', maxWidth: '78ch' }}>
           In 2012, NASA’s 375 m VIIRS sensor began detecting small agricultural and scrub fires that
-          1 km MODIS often missed, creating an artificial 3×–5× jump in raw hotspot records. IGNIS
-          calibrates {fmtNum(meta.totalHotspots)} detections across {meta.countriesCount} countries
-          into a single statistically consistent 26-year fire calendar.
+          1 km MODIS often missed, so raw hotspot counts jump several-fold for no real reason. IGNIS
+          turns {fmtNum(meta.totalHotspots)} detections across {meta.countriesCount} countries into one
+          consistent fire calendar from {meta.archiveStart.slice(0, 4)} to {fmtDate(meta.latestDate)}
+          {meta.isFallback ? ' (offline sample shown: start the data server for real values)' : ''}.
         </p>
       </section>
 
@@ -108,14 +114,14 @@ export function Methods({ meta }: MethodsProps) {
       {/* Leave-One-Year-Out Cross-Validation Table */}
       <section className="bento-card" aria-labelledby="loyo-heading">
         <div className="section-kicker" style={{ marginBottom: 4 }}>
-          02 · LEAVE-ONE-YEAR-OUT CROSS-VALIDATION (2012–2017 SEAM)
+          02 · LEAVE-ONE-YEAR-OUT CROSS-VALIDATION · MODIS AQUA → VIIRS S-NPP, 2012–2017
         </div>
         <h2
           id="loyo-heading"
           className="section-heading text-blur-reveal"
           style={{ margin: '0 0 16px 0', fontSize: 19, fontWeight: 700, letterSpacing: '-0.025em' }}
         >
-          Calibration model comparison (WAPE)
+          How much each method gets wrong on a year it has not seen
         </h2>
         <div style={{ overflowX: 'auto' }}>
           <table
@@ -129,10 +135,10 @@ export function Methods({ meta }: MethodsProps) {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-strong)', color: 'var(--text-secondary)' }}>
                 <th style={{ padding: '10px 12px' }}>Method</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Monthly WAPE</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Annual WAPE</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Median Seam Bias</th>
-                <th style={{ padding: '10px 12px' }}>Diagnostic Notes</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Monthly error</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Yearly error</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Bias</th>
+                <th style={{ padding: '10px 12px' }}>What it means</th>
               </tr>
             </thead>
             <tbody>
@@ -155,10 +161,10 @@ export function Methods({ meta }: MethodsProps) {
                       padding: '10px 12px',
                       textAlign: 'right',
                       fontWeight: row.recommended ? 700 : 500,
-                      color: row.recommended ? 'var(--good)' : 'var(--text-primary)',
+                      color: row.recommended ? 'var(--accent)' : 'var(--text-primary)',
                     }}
                   >
-                    {row.monthlyWapePct.toFixed(1)}%
+                    {num(row.monthlyWapePct, 1, '%')}
                   </td>
                   <td
                     className="font-mono"
@@ -166,14 +172,13 @@ export function Methods({ meta }: MethodsProps) {
                       padding: '10px 12px',
                       textAlign: 'right',
                       fontWeight: row.recommended ? 700 : 500,
-                      color: row.recommended ? 'var(--good)' : 'var(--text-primary)',
+                      color: row.recommended ? 'var(--accent)' : 'var(--text-primary)',
                     }}
                   >
-                    {row.annualWapePct.toFixed(1)}%
+                    {num(row.annualWapePct, 1, '%')}
                   </td>
                   <td className="font-mono" style={{ padding: '10px 12px', textAlign: 'right' }}>
-                    {row.medianBiasPct >= 0 ? '+' : ''}
-                    {row.medianBiasPct.toFixed(1)}%
+                    {signed(row.medianBiasPct, 1, '%')}
                   </td>
                   <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 12.5 }}>
                     {row.notes}
@@ -195,7 +200,7 @@ export function Methods({ meta }: MethodsProps) {
           className="section-heading text-blur-reveal"
           style={{ margin: '0 0 16px 0', fontSize: 19, fontWeight: 700, letterSpacing: '-0.025em' }}
         >
-          Showcase country parameters (k_Aqua, k_Terra, k_NOAA-20)
+          Conversion factors and results per country
         </h2>
         <div style={{ overflowX: 'auto' }}>
           <table
@@ -212,8 +217,8 @@ export function Methods({ meta }: MethodsProps) {
                 <th style={{ padding: '10px 12px', textAlign: 'right' }}>k_Aqua</th>
                 <th style={{ padding: '10px 12px', textAlign: 'right' }}>k_Terra</th>
                 <th style={{ padding: '10px 12px', textAlign: 'right' }}>k_NOAA-20</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Annual CV WAPE</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Industrial Excluded</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Yearly error (CV)</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Industry removed</th>
                 <th style={{ padding: '10px 12px', textAlign: 'right' }}>Grade</th>
               </tr>
             </thead>
@@ -227,19 +232,19 @@ export function Methods({ meta }: MethodsProps) {
                     </span>
                   </td>
                   <td className="font-mono" style={{ padding: '9px 12px', textAlign: 'right' }}>
-                    {c.kAqua.toFixed(2)}
+                    {num(c.kAqua, 2)}
                   </td>
                   <td className="font-mono" style={{ padding: '9px 12px', textAlign: 'right' }}>
-                    {c.kTerra.toFixed(2)}
+                    {num(c.kTerra, 2)}
                   </td>
                   <td className="font-mono" style={{ padding: '9px 12px', textAlign: 'right' }}>
-                    {c.kNoaa20.toFixed(2)}
+                    {num(c.kNoaa20, 2)}
                   </td>
                   <td className="font-mono" style={{ padding: '9px 12px', textAlign: 'right' }}>
-                    {c.cvAnnualErrorPct.toFixed(1)}%
+                    {num(c.cvAnnualErrorPct, 1, '%')}
                   </td>
                   <td className="font-mono" style={{ padding: '9px 12px', textAlign: 'right' }}>
-                    {c.industrialSharePct.toFixed(0)}%
+                    {num(c.industrialSharePct, 0, '%')}
                   </td>
                   <td
                     className="font-mono"
@@ -273,20 +278,21 @@ export function Methods({ meta }: MethodsProps) {
         >
           <div>
             <div className="section-kicker" style={{ marginBottom: 4 }}>
-              04 · 9-COUNTRY SEAM TEST SMALL MULTIPLES (2012–2025)
+              04 · SEAM TEST, COUNTRY BY COUNTRY (2012–2025)
             </div>
             <h2
               id="seam-multiples-heading"
               className="section-heading text-blur-reveal"
               style={{ margin: 0, fontSize: 19, fontWeight: 700, letterSpacing: '-0.025em' }}
             >
-              Harmonized MODIS vs. VIIRS S-NPP across calibration &amp; 2018 version shift
+              Scaled MODIS against what VIIRS really counted
             </h2>
           </div>
           <div className="font-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            <span style={{ color: 'var(--accent)' }}>■</span> Shaded = 2012–2017 fit ·{' '}
+            <span style={{ color: 'var(--accent)' }}>■</span> Shaded = 2012–2017, used to fit · after the dashed
+            line = never seen by the fit ·{' '}
             <span style={{ color: 'var(--series-2)' }}>━━</span> VIIRS S-NPP ·{' '}
-            <span style={{ color: 'var(--series-1)' }}>╌╌</span> MODIS harmonized
+            <span style={{ color: 'var(--series-1)' }}>╌╌</span> MODIS, scaled
           </div>
         </div>
         <SeamSmallMultiples countries={meta.countryCalibrations} />
@@ -328,8 +334,15 @@ export function Methods({ meta }: MethodsProps) {
               MODIS overpass windows, increasing CV uncertainty in 2000–2011 estimates.
             </li>
             <li>
-              Recent 30-day VIIRS near-real-time (NRT) detections are marked provisional (hatched)
-              until NASA’s standard science-quality reprocessing completes.
+              Multiplying cannot create fires MODIS never saw. Where fires are tiny (for example
+              Bahrain), values before 2012 are unreliable, and the report card says so.
+            </li>
+            <li>
+              A brand-new gas flare looks like a fire until it has burned long enough to be flagged.
+            </li>
+            <li>
+              Coverage is {meta.countriesCount} countries and the archive ends on {fmtDate(meta.latestDate)}.
+              Near-real-time months, once added, are hatched as provisional.
             </li>
           </ul>
         </div>
@@ -345,8 +358,8 @@ export function Methods({ meta }: MethodsProps) {
             Open Earth-observation sources
           </h3>
           <p style={{ margin: '0 0 10px 0', fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-            Hotspot detections sourced from <strong>NASA FIRMS</strong> (MODIS Collection 6.1
-            MCD14ML &amp; VIIRS 375 m VNP14IMG / VJ114IMG). True-colour and night-lights imagery
+            Hotspot detections come from the <strong>NASA FIRMS</strong> archive (MODIS MCD14ML &amp;
+            VIIRS 375 m VNP14IMG / VJ114IMG). True-colour and night-lights imagery
             served via <strong>NASA GIBS</strong>. Administrative boundaries derived from{' '}
             <strong>Natural Earth</strong>.
           </p>

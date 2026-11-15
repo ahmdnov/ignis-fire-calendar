@@ -2,6 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 
 interface BurnIntroProps {
   onDismiss: () => void;
+  /** Tagline, kicker and launch button are shown once this is true (after the fire has opened). */
+  revealed?: boolean;
+  /** True while the opening fire transition is still running; Esc then skips it instead of leaving. */
+  burning?: boolean;
+  onSkipBurn?: () => void;
+  /** Root element, so the intro clock can drive the wordmark glow through the --ember-heat CSS variable. */
+  rootRef?: React.Ref<HTMLDivElement>;
+  /** Year span of the loaded archive, e.g. "2000–2025". */
+  rangeLabel?: string;
 }
 
 interface EmberParticle {
@@ -81,12 +90,18 @@ function drawPineRidge(
   ctx.fill();
 }
 
-export function BurnIntro({ onDismiss }: BurnIntroProps) {
+export function BurnIntro({
+  onDismiss,
+  revealed = true,
+  burning = false,
+  onSkipBurn,
+  rootRef,
+  rangeLabel = '2000–2025',
+}: BurnIntroProps) {
   const backdropCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const fireCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const foregroundCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [dissolving, setDissolving] = useState(false);
-  const [revealed, setRevealed] = useState(false);
 
   const handleClose = () => {
     if (dissolving) return;
@@ -97,19 +112,15 @@ export function BurnIntro({ onDismiss }: BurnIntroProps) {
   };
 
   useEffect(() => {
-    const t = window.setTimeout(() => setRevealed(true), 60);
-    return () => window.clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        handleClose();
+        if (burning) onSkipBurn?.();
+        else handleClose();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dissolving]);
+  }, [dissolving, burning, onSkipBurn]);
 
   useEffect(() => {
     const backdropCanvas = backdropCanvasRef.current;
@@ -353,6 +364,7 @@ export function BurnIntro({ onDismiss }: BurnIntroProps) {
 
   return (
     <div
+      ref={rootRef}
       data-testid="burn-intro-overlay"
       role="dialog"
       aria-modal="true"
@@ -393,16 +405,13 @@ export function BurnIntro({ onDismiss }: BurnIntroProps) {
       {/* Center Stage: Pure-Vector Wordmark + Launch CTA */}
       <div
         className="relative z-10 flex max-w-[680px] flex-col items-center px-6 py-8 text-center"
-        style={{
-          opacity: revealed ? 1 : 0,
-          transform: revealed ? 'translateY(0)' : 'translateY(8px)',
-          transition: 'opacity 550ms ease, transform 550ms cubic-bezier(0.16, 1, 0.3, 1)',
-        }}
       >
         <div
           style={{
             padding: '10px 14px',
-            filter: 'drop-shadow(0 0 14px rgba(234, 88, 12, 0.22))',
+            // --ember-heat (0..1) is driven by the intro clock: the lettering glows as the fire passes, then cools.
+            filter:
+              'drop-shadow(0 0 calc(14px + 30px * var(--ember-heat, 0)) rgba(234, 88, 12, calc(0.22 + 0.62 * var(--ember-heat, 0)))) drop-shadow(0 0 calc(4px * var(--ember-heat, 0)) rgba(253, 224, 71, calc(0.55 * var(--ember-heat, 0))))',
           }}
         >
           <svg
@@ -436,7 +445,21 @@ export function BurnIntro({ onDismiss }: BurnIntroProps) {
         </div>
 
         <div
-          className="font-mono text-blur-reveal"
+          aria-hidden={!revealed}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            opacity: revealed ? 1 : 0,
+            transform: revealed ? 'translateY(0)' : 'translateY(10px)',
+            filter: revealed ? 'blur(0)' : 'blur(6px)',
+            transition:
+              'opacity 600ms ease, transform 600ms cubic-bezier(0.16, 1, 0.3, 1), filter 600ms ease',
+            pointerEvents: revealed ? 'auto' : 'none',
+          }}
+        >
+        <div
+          className="font-mono"
           style={{
             marginTop: 22,
             fontSize: 12,
@@ -450,7 +473,7 @@ export function BurnIntro({ onDismiss }: BurnIntroProps) {
         </div>
 
         <h1
-          className="display-heading text-blur-reveal text-blur-reveal--delay-1"
+          className="display-heading"
           style={{
             marginTop: 14,
             marginBottom: 30,
@@ -462,12 +485,13 @@ export function BurnIntro({ onDismiss }: BurnIntroProps) {
             textWrap: 'balance',
           }}
         >
-          One fire calendar. Two decades. Every sensor. (2000–2026)
+          One fire calendar. Two decades. Every sensor. ({rangeLabel})
         </h1>
 
         <button
           type="button"
           onClick={handleClose}
+          tabIndex={revealed ? 0 : -1}
           className="btn-primary-ember"
           style={{
             height: 46,
@@ -478,6 +502,7 @@ export function BurnIntro({ onDismiss }: BurnIntroProps) {
         >
           Launch Fire Calendar →
         </button>
+        </div>
       </div>
     </div>
   );

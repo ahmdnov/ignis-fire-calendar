@@ -22,14 +22,18 @@ export function HistoryStrip({ points, medianValue, onHoverTooltip }: HistoryStr
   const innerW = w - pad.left - pad.right;
   const innerH = h - pad.top - pad.bottom;
 
-  const maxV = Math.max(10, d3.max(points, (d) => d.value) || 100, medianValue * 1.2);
+  const med = Number.isFinite(medianValue) ? medianValue : 0;
+  const maxV = Math.max(4, d3.max(points, (d) => d.value) || 4, med * 1.2);
+  const firstYear = points[0]?.year;
+  const lastYear = points[points.length - 1]?.year;
+  const currentYear = points.find((d) => d.isCurrent)?.year;
   const x = d3
     .scaleBand<number>()
     .domain(points.map((d) => d.year))
     .range([0, innerW])
     .padding(0.22);
   const y = d3.scaleLinear().domain([0, maxV]).range([innerH, 0]);
-  const medY = y(medianValue);
+  const medY = y(med);
 
   return (
     <div>
@@ -45,8 +49,8 @@ export function HistoryStrip({ points, medianValue, onHoverTooltip }: HistoryStr
           justifyContent: 'space-between',
         }}
       >
-        <span>SAME-WINDOW HISTORY (2001–2026)</span>
-        <span>MEDIAN {fmtCompact(medianValue)}</span>
+        <span>SAME DATES, EVERY YEAR</span>
+        <span>MEDIAN {Number.isFinite(medianValue) ? fmtCompact(medianValue) : '—'}</span>
       </div>
       <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
         <g transform={`translate(${pad.left}, ${pad.top})`}>
@@ -81,20 +85,21 @@ export function HistoryStrip({ points, medianValue, onHoverTooltip }: HistoryStr
                   onHoverTooltip({
                     x: e.clientX,
                     y: e.clientY,
-                    title: `${d.year} · Same seasonal window`,
+                    title: `${d.year} · same dates`,
                     lines: [
-                      { label: 'Harmonized count', value: fmtNum(d.value), color },
-                      { label: '25-yr median', value: fmtNum(medianValue) },
+                      { label: 'Hotspot-days', value: fmtNum(d.value), color },
+                      { label: 'Baseline median', value: fmtNum(med) },
                     ],
+                    note: d.year < 2012 ? 'MODIS era: scaled to VIIRS units' : undefined,
                   })
                 }
                 onMouseLeave={() => onHoverTooltip(null)}
               />
             );
           })}
-          {[2001, 2012, 2020, 2026].map((yr) => {
-            const px = x(yr);
-            if (px === undefined) return null;
+          {Array.from(new Set([firstYear, 2012, currentYear ?? lastYear])).map((yr) => {
+            const px = yr === undefined ? undefined : x(yr);
+            if (px === undefined || yr === undefined) return null;
             return (
               <text
                 key={yr}
@@ -103,7 +108,7 @@ export function HistoryStrip({ points, medianValue, onHoverTooltip }: HistoryStr
                 textAnchor="middle"
                 fontSize={9.5}
                 fontFamily="var(--font-mono)"
-                fill={yr === 2026 ? 'var(--accent)' : 'var(--text-muted)'}
+                fill={yr === currentYear ? 'var(--accent)' : 'var(--text-muted)'}
               >
                 {yr}
               </text>
@@ -118,10 +123,15 @@ export function HistoryStrip({ points, medianValue, onHoverTooltip }: HistoryStr
 interface SeasonCurveProps {
   days: SeasonCurvePoint[];
   daysOffset: number;
+  /** Year drawn as the solid line. */
+  year?: number;
+  /** One-line reading of the curve, when the data source provides it. */
+  note?: string;
   onHoverTooltip: (tip: TooltipState | null) => void;
 }
 
-export function SeasonCurve({ days, daysOffset, onHoverTooltip }: SeasonCurveProps) {
+export function SeasonCurve({ days, daysOffset, year, note, onHoverTooltip }: SeasonCurveProps) {
+  const yearLabel = year ? String(year) : 'This year';
   const w = 540;
   const h = 230;
   const m = { top: 14, right: 16, bottom: 26, left: 48 };
@@ -156,8 +166,9 @@ export function SeasonCurve({ days, daysOffset, onHoverTooltip }: SeasonCurvePro
     .curve(d3.curveMonotoneX);
 
   const yTicks = y.ticks(4);
-  const offsetText =
-    daysOffset > 2
+  const offsetText = note
+    ? note
+    : daysOffset > 2
       ? `${daysOffset} days ahead of typical season`
       : daysOffset < -2
         ? `${Math.abs(daysOffset)} days behind typical season`
@@ -166,7 +177,7 @@ export function SeasonCurve({ days, daysOffset, onHoverTooltip }: SeasonCurvePro
   return (
     <div className="bento-card">
       <div className="section-kicker" style={{ marginBottom: 4 }}>
-        CUMULATIVE SEASONAL PACE
+        CUMULATIVE HOTSPOT-DAYS THROUGH THE YEAR
       </div>
       <div
         style={{
@@ -182,7 +193,7 @@ export function SeasonCurve({ days, daysOffset, onHoverTooltip }: SeasonCurvePro
           className="section-heading text-blur-reveal"
           style={{ margin: 0, fontSize: 17, fontWeight: 700, letterSpacing: '-0.024em' }}
         >
-          Season-to-date burn curve
+          {yearLabel} against a normal year
         </h3>
         <span className="font-mono" style={{ fontSize: 11.5, color: 'var(--accent)' }}>
           {offsetText}
@@ -235,7 +246,7 @@ export function SeasonCurve({ days, daysOffset, onHoverTooltip }: SeasonCurvePro
                     title: `${pt.dateLabel} (DOY ${pt.doy})`,
                     lines: [
                       {
-                        label: '2026 cumulative',
+                        label: `${yearLabel} so far`,
                         value: fmtNum(pt.current || 0),
                         color: 'var(--series-2)',
                       },
@@ -290,13 +301,13 @@ export function SeasonCurve({ days, daysOffset, onHoverTooltip }: SeasonCurvePro
         }}
       >
         <span>
-          <strong style={{ color: 'var(--series-2)' }}>━━</strong> 2026 cumulative
+          <strong style={{ color: 'var(--series-2)' }}>━━</strong> {yearLabel} cumulative
         </span>
         <span>
-          <strong style={{ color: 'var(--series-1)' }}>╌╌</strong> Historical median
+          <strong style={{ color: 'var(--series-1)' }}>╌╌</strong> Normal year (median)
         </span>
         <span>
-          <strong style={{ color: 'var(--series-1)', opacity: 0.55 }}>■</strong> 10th–90th pct envelope
+          <strong style={{ color: 'var(--series-1)', opacity: 0.55 }}>■</strong> 8 of every 10 past years
         </span>
       </div>
     </div>
@@ -341,7 +352,7 @@ export function AnnualChart({ annual, trend, onHoverTooltip }: AnnualChartProps)
   return (
     <div className="bento-card">
       <div className="section-kicker" style={{ marginBottom: 4 }}>
-        LONG-TERM TRAJECTORY (2001–2026)
+        LONG-TERM TRAJECTORY ({fullYears[0]?.year}–{fullYears[fullYears.length - 1]?.year})
       </div>
       <div
         style={{
@@ -366,8 +377,8 @@ export function AnnualChart({ annual, trend, onHoverTooltip }: AnnualChartProps)
             color: trend.significant ? 'var(--accent)' : 'var(--text-secondary)',
           }}
         >
-          Theil–Sen {trend.slopePctPerYear >= 0 ? '+' : ''}
-          {trend.slopePctPerYear.toFixed(1)}%/yr · p={trend.pValue.toFixed(3)}
+          {trend.slopePctPerYear >= 0 ? '+' : ''}
+          {trend.slopePctPerYear.toFixed(1)}% per year · {trend.pValue < 0.001 ? 'p < 0.001' : `p = ${trend.pValue.toFixed(3)}`}
         </span>
       </div>
 
@@ -417,7 +428,7 @@ export function AnnualChart({ annual, trend, onHoverTooltip }: AnnualChartProps)
                           value: `${fmtCompact(d.cvLower)}–${fmtCompact(d.cvUpper)}`,
                         },
                       ],
-                      note: d.provisional ? 'YTD through Nov 14 (provisional)' : undefined,
+                      note: d.provisional ? 'Year not complete yet' : undefined,
                     })
                   }
                   onMouseLeave={() => onHoverTooltip(null)}
@@ -448,7 +459,7 @@ export function AnnualChart({ annual, trend, onHoverTooltip }: AnnualChartProps)
             strokeDasharray="5 3"
           />
 
-          {[2001, 2006, 2012, 2018, 2026].map((yr) => {
+          {Array.from(new Set([2001, 2006, 2012, 2018, fullYears[fullYears.length - 1]?.year ?? 2025])).map((yr) => {
             const px = x(yr);
             if (px === undefined) return null;
             return (
@@ -480,15 +491,16 @@ export function AnnualChart({ annual, trend, onHoverTooltip }: AnnualChartProps)
         }}
       >
         <span>
-          <strong style={{ color: 'var(--series-1)' }}>■</strong> MODIS + CV whiskers
+          <strong style={{ color: 'var(--series-1)' }}>■</strong> MODIS era (scaled) with error whiskers
         </span>
         <span>
-          <strong style={{ color: 'var(--series-2)' }}>■</strong> VIIRS 375 m
+          <strong style={{ color: 'var(--series-2)' }}>■</strong> VIIRS era
         </span>
         <span>
-          <strong style={{ color: 'var(--accent)' }}>╌╌</strong> Theil–Sen slope
+          <strong style={{ color: 'var(--accent)' }}>╌╌</strong> Trend (Theil–Sen)
         </span>
       </div>
+
     </div>
   );
 }
@@ -497,6 +509,8 @@ interface ClimatologyProps {
   months: ClimatologyMonth[];
   baselineStart: number;
   baselineEnd: number;
+  /** Year shown as dots on top of the normal range. */
+  year?: number;
   onHoverTooltip: (tip: TooltipState | null) => void;
 }
 
@@ -504,8 +518,10 @@ export function Climatology({
   months,
   baselineStart,
   baselineEnd,
+  year,
   onHoverTooltip,
 }: ClimatologyProps) {
+  const yearLabel = year ? String(year) : 'latest year';
   const w = 540;
   const h = 230;
   const m = { top: 14, right: 16, bottom: 26, left: 48 };
@@ -527,7 +543,7 @@ export function Climatology({
   return (
     <div className="bento-card">
       <div className="section-kicker" style={{ marginBottom: 4 }}>
-        MONTHLY CLIMATOLOGY ({baselineStart}–{baselineEnd})
+        NORMAL RANGE FOR EACH MONTH ({baselineStart}–{baselineEnd})
       </div>
       <div
         style={{
@@ -543,10 +559,10 @@ export function Climatology({
           className="section-heading text-blur-reveal"
           style={{ margin: 0, fontSize: 17, fontWeight: 700, letterSpacing: '-0.024em' }}
         >
-          Typical fire season vs. 2026
+          The normal fire season, and {yearLabel}
         </h3>
         <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          10–90% whiskers · IQR box
+          box = middle half of years · whiskers = 10–90% · dot = {yearLabel}
         </span>
       </div>
 
@@ -583,7 +599,7 @@ export function Climatology({
                     title: `${d.label} climatology`,
                     lines: [
                       {
-                        label: '2026 observed',
+                        label: `${yearLabel} observed`,
                         value: d.currentYear !== null ? fmtNum(d.currentYear) : '—',
                         color: 'var(--series-2)',
                       },

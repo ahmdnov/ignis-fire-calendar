@@ -1,15 +1,10 @@
-import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import {
-  Download,
-  Image as ImageIcon,
-  Moon,
-  Printer,
-  Sun,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
+import { AlertTriangle, Info, Moon, Sun } from 'lucide-react';
 import type {
   AreaInputMode,
   AreaSelection,
   BasemapId,
+  BreakdownResponse,
   CalendarViewMode,
   ColorRampId,
   DrawTool,
@@ -21,56 +16,72 @@ import type {
   ThemeMode,
 } from './types';
 import {
+  ApiError,
   downloadCalendarCsv,
   downloadHotspotsCsv,
+  fetchBreakdown,
   fetchMapData,
   fetchMeta,
   fetchRegions,
   fetchSummary,
 } from './api';
 import {
-  getFallbackMap,
-  getFallbackMeta,
-  getFallbackRegions,
-  getFallbackSummary,
-  LATEST_ARCHIVE_DATE,
-} from './fallbackData';
-import {
-  applyBaselineToSummary,
   computeBbox,
   computePresetWindow,
   createCirclePolygon,
   estimateAreaKm2,
-  monthDateRange,
+  fmtDate,
+  fmtDateRange,
   parseUrlState,
   slugify,
 } from './util';
 import { WordmarkSvg } from './components/WordmarkSvg';
-import { BurnIntro } from './components/BurnIntro';
+import { IntroController } from './intro/IntroController';
 import { Tooltip, type TooltipState } from './components/Tooltip';
 import { MapView } from './components/MapView';
-import { CalendarHeatmap } from './components/CalendarHeatmap';
 import { AnnualChart, Climatology, SeasonCurve } from './components/Charts';
 import { ExclusionsCard, Headline, ReportCard } from './components/Panels';
+import { CommandBar, SectionNav, type PeriodPreset, type SectionDef } from './components/CommandBar';
+import {
+  Briefing,
+  StoryPager,
+  OutlookCard,
+  OutlookTrackCard,
+  MonthsVsNormalCard,
+  ProvinceRanking,
+  RecordMonthsCard,
+  StoryChapter,
+  TopYearsCard,
+} from './components/Story';
+import {
+  nowInsight,
+  thisYearInsight,
+  trendInsight,
+  trustInsight,
+  nextInsight,
+  whenInsight,
+  whereInsight,
+} from './insights';
 import { Methods } from './pages/Methods';
 
-const GlobeView = lazy(() => import('./components/GlobeView').then(m => ({ default: m.GlobeView })));
+const GlobeView = lazy(() => import('./components/GlobeView').then((m) => ({ default: m.GlobeView })));
 
-const SHOWCASE_CHIPS = [
-  { code: 'c:IRQ', label: 'Iraq' },
-  { code: 'c:IRN', label: 'Iran' },
-  { code: 'c:SAU', label: 'Saudi Arabia' },
-  { code: 'c:KWT', label: 'Kuwait' },
-  { code: 'c:ARE', label: 'UAE' },
-  { code: 'c:QAT', label: 'Qatar' },
-  { code: 'c:OMN', label: 'Oman' },
-  { code: 'c:BHR', label: 'Bahrain' },
-  { code: 'c:ARG', label: 'Argentina' },
+const DEFAULT_AREA = 'c:IRQ';
+const DEFAULT_PRESET: PeriodPreset = '12m';
+
+/** The story, in reading order. Chip labels are the chapter questions in short form. */
+const SECTIONS: (SectionDef & { question: string })[] = [
+  { id: 'sec-now', label: 'Overview', question: 'Overview' },
+  { id: 'sec-where', label: 'Where', question: 'Where is it burning?' },
+  { id: 'sec-when', label: 'When', question: 'When in the year does it burn?' },
+  { id: 'sec-year', label: 'This year', question: 'How is this year going?' },
+  { id: 'sec-trend', label: 'Trend', question: 'Is it getting worse?' },
+  { id: 'sec-next', label: 'Next', question: "What's likely next?" },
+  { id: 'sec-trust', label: 'Trust', question: 'Can you trust these numbers?' },
 ];
 
 function countryToArea(regions: RegionsResponse, code: string, provinceCode?: string): AreaSelection {
-  const country =
-    regions.countries.find((c) => c.code === code) || regions.countries[0];
+  const country = regions.countries.find((c) => c.code === code) || regions.countries[0];
   if (provinceCode) {
     const prov = country.provinces.find((p) => p.code === provinceCode);
     if (prov) {
@@ -101,24 +112,48 @@ function countryToArea(regions: RegionsResponse, code: string, provinceCode?: st
   };
 }
 
-export default function App() {
-  const initialUrl = useMemo(
-    () =>
-      typeof window !== 'undefined'
-        ? parseUrlState(window.location.search)
-        : {},
-    []
-  );
+function circleArea(lat: number, lon: number, rad: number): AreaSelection {
+  const geom = createCirclePolygon(lon, lat, rad);
+  return {
+    id: `coords:${lat.toFixed(2)}:${lon.toFixed(2)}:${rad}`,
+    label: `${rad} km around ${lat.toFixed(2)}°, ${lon.toFixed(2)}°`,
+    slug: `coords_${lat.toFixed(1)}_${lon.toFixed(1)}_${rad}km`,
+    kind: 'coords',
+    bbox: computeBbox(geom),
+    center: [lon, lat],
+    geometry: geom,
+    areaKm2: estimateAreaKm2(geom),
+    circleRadiusKm: rad,
+  };
+}
 
-  // Theme persisted under localStorage.getItem("ignis-theme")
-  const [theme, setTheme] = useState<ThemeMode>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = window.localStorage.getItem('ignis-theme');
-      if (saved === 'light' || saved === 'dark') return saved;
+/** Rebuild an area from its id in the URL: c:IRQ, p:IRQ-3228, coords:lat:lon:radius. */
+function areaFromId(regions: RegionsResponse, id: string | undefined): AreaSelection {
+  if (id?.startsWith('coords:')) {
+    const [lat, lon, rad] = id.slice(7).split(':').map(Number);
+    if ([lat, lon, rad].every(Number.isFinite) && Math.abs(lat) <= 85 && Math.abs(lon) <= 180 && rad >= 5 && rad <= 600) {
+      return circleArea(lat, lon, rad);
     }
-    return 'dark';
-  });
+  }
+  if (id?.startsWith('p:')) {
+    for (const c of regions.countries) {
+      if (c.provinces.some((p) => p.code === id)) return countryToArea(regions, c.code, id);
+    }
+  }
+  const code = regions.countries.some((c) => c.code === id) ? (id as string) : DEFAULT_AREA;
+  return countryToArea(regions, code);
+}
 
+const isIsoDate = (s: string | null): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+export default function App() {
+  const initialUrl = useMemo(() => parseUrlState(window.location.search), []);
+  const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
+
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const saved = window.localStorage.getItem('ignis-theme');
+    return saved === 'light' || saved === 'dark' ? saved : 'dark';
+  });
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     window.localStorage.setItem('ignis-theme', theme);
@@ -127,296 +162,294 @@ export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => !initialUrl.skipIntro);
   const [navTab, setNavTab] = useState<NavTab>(initialUrl.tab || 'explore');
 
-  // Reference metadata & regions (seeded immediately with fallback so UI never stalls)
-  const initialRegions = useMemo(() => getFallbackRegions(), []);
-  const initialMeta = useMemo(() => getFallbackMeta(), []);
-  const [regions, setRegions] = useState<RegionsResponse>(initialRegions);
-  const [meta, setMeta] = useState<MetaResponse>(initialMeta);
+  // The landing covers the page; keep the document from scrolling behind it.
+  useEffect(() => {
+    document.documentElement.style.overflow = showIntro ? 'hidden' : '';
+    return () => {
+      document.documentElement.style.overflow = '';
+    };
+  }, [showIntro]);
 
-  // Active Area Selection
-  const defaultArea = useMemo(
-    () => countryToArea(initialRegions, initialUrl.area || 'c:IRQ'),
-    [initialRegions, initialUrl.area]
-  );
-  const [area, setArea] = useState<AreaSelection>(defaultArea);
+  /* ------------------------------------------------------------------ reference data */
+  const [meta, setMeta] = useState<MetaResponse | null>(null);
+  const [regions, setRegions] = useState<RegionsResponse | null>(null);
+
+  /* ------------------------------------------------------------------ selection */
+  const [area, setArea] = useState<AreaSelection | null>(null);
   const [areaInputMode, setAreaInputMode] = useState<AreaInputMode>('region');
-  const [selectedCountryCode, setSelectedCountryCode] = useState<string>(
-    defaultArea.countryCode || 'c:IRQ'
-  );
-  const [selectedProvinceCode, setSelectedProvinceCode] = useState<string>('');
-  const [display, setDisplay] = useState<'map' | 'globe'>('globe');
-  useEffect(() => { if (areaInputMode === 'draw') setDisplay('map'); }, [areaInputMode]);
   const [drawTool, setDrawTool] = useState<DrawTool>('polygon');
+  const [display, setDisplay] = useState<'map' | 'globe'>('globe');
+  const [basemap, setBasemap] = useState<BasemapId>('map');
 
-  // Coordinates form inputs
-  const [coordLat, setCoordLat] = useState<string>(String(defaultArea.center[1]));
-  const [coordLon, setCoordLon] = useState<string>(String(defaultArea.center[0]));
-  const [coordRadiusKm, setCoordRadiusKm] = useState<string>('80');
-  const [coordError, setCoordError] = useState<string>('');
-
-  // Map & Export window
-  const defaultWindow = useMemo(() => computePresetWindow(LATEST_ARCHIVE_DATE, '30d'), []);
-  const [windowFrom, setWindowFrom] = useState<string>(defaultWindow.from);
-  const [windowTo, setWindowTo] = useState<string>(defaultWindow.to);
+  const [windowFrom, setWindowFrom] = useState<string>('');
+  const [windowTo, setWindowTo] = useState<string>('');
+  const [activePreset, setActivePreset] = useState<PeriodPreset | null>(DEFAULT_PRESET);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
 
-  // Calendar & Baseline controls
   const [viewMode, setViewMode] = useState<CalendarViewMode>(initialUrl.view || 'harm');
   const [baselineStart, setBaselineStart] = useState<number>(2001);
   const [baselineEnd, setBaselineEnd] = useState<number>(2025);
   const [colorRamp, setColorRamp] = useState<ColorRampId>('fire');
-  const [basemap, setBasemap] = useState<BasemapId>('map');
 
-  // Summary & Map data
-  const [summary, setSummary] = useState<SummaryResponse>(() =>
-    getFallbackSummary(defaultArea, defaultWindow.from, defaultWindow.to, 2001, 2025)
-  );
-  const [mapData, setMapData] = useState<MapResponse>(() =>
-    getFallbackMap(defaultArea, defaultWindow.from, defaultWindow.to)
-  );
-  const [loading, setLoading] = useState<boolean>(false);
+  /* ------------------------------------------------------------------ results */
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [mapData, setMapData] = useState<MapResponse | null>(null);
+  const [breakdown, setBreakdown] = useState<BreakdownResponse | null>(null);
+  const [rankingExpanded, setRankingExpanded] = useState(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  // Floating tooltip & Calendar SVG ref for PNG export
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
-  const calendarSvgRef = useRef<SVGSVGElement | null>(null);
 
-  // Hydrate /api/meta and /api/regions on mount
+  const lastFullYear = useMemo(() => {
+    if (!meta) return 2025;
+    return meta.latestDate.endsWith('-12-31') ? meta.currentYear : meta.currentYear - 1;
+  }, [meta]);
+
+  // Load the archive description and the region list once, then set the first view from the URL.
   useEffect(() => {
     let alive = true;
-    Promise.all([fetchMeta(), fetchRegions()]).then(([m, r]) => {
-      if (!alive) return;
-      setMeta(m);
-      setRegions(r);
-      if (initialUrl.area && initialUrl.area.startsWith('c:')) {
-        const nextArea = countryToArea(r, initialUrl.area);
-        setArea(nextArea);
-        setSelectedCountryCode(nextArea.countryCode || 'c:IRQ');
-      }
-    });
+    fetchMeta()
+      .then((m) => fetchRegions().then((r) => [m, r] as const))
+      .then(([m, r]) => {
+        if (!alive) return;
+        setMeta(m);
+        setRegions(r);
+        setArea(areaFromId(r, initialUrl.area));
+
+        const full = m.latestDate.endsWith('-12-31') ? m.currentYear : m.currentYear - 1;
+        setBaselineEnd(full);
+
+        const qFrom = initialParams.get('from');
+        const qTo = initialParams.get('to');
+        if (isIsoDate(qFrom) && isIsoDate(qTo) && qFrom <= qTo && qTo <= m.latestDate && qFrom >= m.archiveStart) {
+          setWindowFrom(qFrom);
+          setWindowTo(qTo);
+          setActivePreset(null);
+        } else {
+          const w = computePresetWindow(m.latestDate, DEFAULT_PRESET);
+          setWindowFrom(w.from);
+          setWindowTo(w.to);
+        }
+      });
     return () => {
       alive = false;
     };
-  }, [initialUrl.area]);
+  }, [initialUrl.area, initialParams]);
 
-  // Sync URL query params (?area=...&view=...)
+  // Keep the address bar shareable.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!area || !windowFrom) return;
     const sp = new URLSearchParams(window.location.search);
-    sp.set('area', area.id);
+    if (area.kind === 'draw') sp.delete('area');
+    else sp.set('area', area.id);
+    sp.set('from', windowFrom);
+    sp.set('to', windowTo);
     sp.set('view', viewMode);
     if (navTab === 'methods') sp.set('tab', 'methods');
     else sp.delete('tab');
-    const nextUrl = `${window.location.pathname}?${sp.toString()}`;
-    window.history.replaceState(null, '', nextUrl);
-  }, [area.id, viewMode, navTab]);
+    window.history.replaceState(null, '', `${window.location.pathname}?${sp.toString()}`);
+  }, [area, windowFrom, windowTo, viewMode, navTab]);
 
-  // Fetch /api/summary when area or window changes
+  // Fetch whenever the question changes: area, period or baseline.
   useEffect(() => {
+    if (!area || !windowFrom || !windowTo) return;
     let alive = true;
     setLoading(true);
-    Promise.all([
-      fetchSummary({
-        area,
-        from: windowFrom,
-        to: windowTo,
-        baselineStart,
-        baselineEnd,
-      }),
-      fetchMapData({
-        area,
-        from: windowFrom,
-        to: windowTo,
-      }),
+    Promise.allSettled([
+      fetchSummary({ area, from: windowFrom, to: windowTo, baselineStart, baselineEnd }),
+      fetchMapData({ area, from: windowFrom, to: windowTo }),
     ]).then(([sumRes, mapRes]) => {
       if (!alive) return;
-      setSummary(sumRes);
-      setMapData(mapRes);
+      if (sumRes.status === 'fulfilled') {
+        setSummary(sumRes.value);
+        setError(null);
+      } else {
+        const e = sumRes.reason;
+        setError(
+          e instanceof ApiError
+            ? `This area could not be analysed: ${e.message}`
+            : 'The data server did not answer. Check that it is running, then try again.'
+        );
+      }
+      if (mapRes.status === 'fulfilled') setMapData(mapRes.value);
       setLoading(false);
     });
     return () => {
       alive = false;
     };
-  }, [area, windowFrom, windowTo]);
+  }, [area, windowFrom, windowTo, baselineStart, baselineEnd]);
 
-  // Recompute baseline stats instantly when baseline years change
+  // Province breakdown of the area's country (for a country or a province). Keyed on the country,
+  // so moving between provinces of one country does not refetch.
+  const breakdownCountry = area?.kind === 'region' ? area.countryCode : undefined;
   useEffect(() => {
-    setSummary((prev) => applyBaselineToSummary(prev, baselineStart, baselineEnd));
-  }, [baselineStart, baselineEnd]);
-
-  const handleSelectCountry = (code: string) => {
-    setAreaInputMode('region');
-    setSelectedCountryCode(code);
-    setSelectedProvinceCode('');
-    const next = countryToArea(regions, code);
-    setArea(next);
-    setCoordLat(String(next.center[1]));
-    setCoordLon(String(next.center[0]));
-  };
-
-  const handleSelectProvince = (provCode: string) => {
-    setSelectedProvinceCode(provCode);
-    const next = countryToArea(regions, selectedCountryCode, provCode || undefined);
-    setArea(next);
-    setCoordLat(String(next.center[1]));
-    setCoordLon(String(next.center[0]));
-  };
-
-  const handleApplyCoords = (e: React.FormEvent) => {
-    e.preventDefault();
-    const lat = Number(coordLat);
-    const lon = Number(coordLon);
-    const rad = Number(coordRadiusKm);
-    if (!Number.isFinite(lat) || lat < -85 || lat > 85) {
-      setCoordError('Latitude must be between -85 and 85.');
+    if (!breakdownCountry || !windowFrom || !windowTo) {
+      setBreakdown(null);
       return;
     }
-    if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
-      setCoordError('Longitude must be between -180 and 180.');
-      return;
-    }
-    if (!Number.isFinite(rad) || rad < 5 || rad > 600) {
-      setCoordError('Radius must be between 5 and 600 km.');
-      return;
-    }
-    setCoordError('');
-    const geom = createCirclePolygon(lon, lat, rad);
-    setArea({
-      id: `coords:${lat.toFixed(2)}:${lon.toFixed(2)}:${rad}`,
-      label: `Point (${lat.toFixed(2)}°, ${lon.toFixed(2)}° · ${rad} km)`,
-      slug: `coords_${lat.toFixed(1)}_${lon.toFixed(1)}_${rad}km`,
-      kind: 'coords',
-      bbox: computeBbox(geom),
-      center: [lon, lat],
-      geometry: geom,
-      areaKm2: estimateAreaKm2(geom),
-      circleRadiusKm: rad,
-    });
-  };
-
-  const handleSelectMonthFromCalendar = (year: number, month: number) => {
-    const { from, to } = monthDateRange(year, month, meta.latestDate);
-    setSelectedMonthKey(`${year}-${month}`);
-    setWindowFrom(from);
-    setWindowTo(to);
-  };
-
-  const handlePresetWindow = (preset: '30d' | '12m' | '5y') => {
-    const { from, to } = computePresetWindow(meta.latestDate, preset);
-    setSelectedMonthKey(null);
-    setWindowFrom(from);
-    setWindowTo(to);
-  };
-
-  const handleExportPng = () => {
-    const svg = calendarSvgRef.current;
-    if (!svg) return;
-    const serializer = new XMLSerializer();
-    const clone = svg.cloneNode(true) as SVGSVGElement;
-
-    // Resolve CSS variables to concrete colors for standalone PNG rendering
-    const cs = getComputedStyle(document.documentElement);
-    let markup = serializer.serializeToString(clone);
-    const varNames = [
-      '--page',
-      '--surface-1',
-      '--surface-2',
-      '--surface-3',
-      '--border-strong',
-      '--text-primary',
-      '--text-secondary',
-      '--text-muted',
-      '--series-1',
-      '--series-2',
-      '--accent',
-      '--empty-cell',
-    ];
-    for (const v of varNames) {
-      const val = cs.getPropertyValue(v).trim() || '#FAFAFA';
-      markup = markup.replaceAll(`var(${v})`, val);
-    }
-
-    const svgBlob = new Blob([markup], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(svgBlob);
-    const img = new Image();
-    img.onload = () => {
-      const scale = 2;
-      const w = 960 * scale;
-      const h = 760 * scale;
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      ctx.fillStyle = theme === 'light' ? '#FFFFFF' : '#09090B';
-      ctx.fillRect(0, 0, w, h);
-
-      ctx.fillStyle = theme === 'light' ? '#09090B' : '#FAFAFA';
-      ctx.font = `700 ${20 * scale}px "Plus Jakarta Sans", sans-serif`;
-      ctx.fillText(`IGNIS · ${area.label} (${viewMode.toUpperCase()})`, 36 * scale, 40 * scale);
-
-      ctx.drawImage(img, 24 * scale, 56 * scale, w - 48 * scale, h - 104 * scale);
-
-      ctx.fillStyle = '#A1A1AA';
-      ctx.font = `500 ${11 * scale}px "IBM Plex Mono", monospace`;
-      ctx.fillText(
-        'IGNIS · data: NASA FIRMS (MODIS C6.1, VIIRS 375 m), harmonized',
-        36 * scale,
-        h - 20 * scale
-      );
-
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const pngUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = pngUrl;
-        a.download = `ignis_calendar_${area.slug || slugify(area.label)}.png`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(pngUrl), 1000);
-      });
-      URL.revokeObjectURL(url);
+    let alive = true;
+    fetchBreakdown({ countryCode: breakdownCountry, from: windowFrom, to: windowTo, baselineStart, baselineEnd })
+      .then((b) => alive && setBreakdown(b))
+      .catch(() => alive && setBreakdown(null));
+    return () => {
+      alive = false;
     };
-    img.src = url;
+  }, [breakdownCountry, windowFrom, windowTo, baselineStart, baselineEnd]);
+  useEffect(() => setRankingExpanded(false), [breakdownCountry]);
+
+  /* ------------------------------------------------------------------ handlers */
+  // One question is shown at a time. Choosing one swaps the view and returns to the top of it.
+  const [activeSec, setActiveSec] = useState('sec-now');
+  const scrollToSection = useCallback((id: string) => {
+    setActiveSec(id);
+    window.setTimeout(() => {
+      const top = document.getElementById('story-top');
+      if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }, 30);
+  }, []);
+
+  const handleSelectCountry = useCallback(
+    (code: string) => {
+      if (!regions) return;
+      setAreaInputMode('region');
+      setArea(countryToArea(regions, code));
+    },
+    [regions]
+  );
+
+  const handleSelectProvince = useCallback(
+    (countryCode: string, provCode: string) => {
+      if (!regions) return;
+      setAreaInputMode('region');
+      setArea(countryToArea(regions, countryCode, provCode || undefined));
+    },
+    [regions]
+  );
+
+  const handleAreaInputMode = useCallback((mode: AreaInputMode) => {
+    setAreaInputMode(mode);
+    if (mode === 'draw') setDisplay('map');
+  }, []);
+
+  const handleStartDrawing = useCallback(() => {
+    setAreaInputMode('draw');
+    setDisplay('map');
+    scrollToSection('sec-where');
+  }, [scrollToSection]);
+
+  const handlePreset = useCallback(
+    (preset: PeriodPreset) => {
+      if (!meta) return;
+      const w = computePresetWindow(meta.latestDate, preset);
+      setSelectedMonthKey(null);
+      setActivePreset(preset);
+      setWindowFrom(w.from);
+      setWindowTo(w.to);
+    },
+    [meta]
+  );
+
+  const handleWindow = useCallback((from: string, to: string) => {
+    setSelectedMonthKey(null);
+    setActivePreset(null);
+    setWindowFrom(from);
+    setWindowTo(to);
+  }, []);
+
+  const handleExportCalendar = async () => {
+    if (!summary) return;
+    const msg = await downloadCalendarCsv(summary);
+    if (msg) setNotice(msg);
   };
 
-  const activeCountry = useMemo(
-    () => regions.countries.find((c) => c.code === selectedCountryCode) || regions.countries[0],
-    [regions.countries, selectedCountryCode]
+  const handleExportHotspots = async () => {
+    if (!area) return;
+    setNotice('Preparing the hotspot file. Large areas can take a minute.');
+    const msg = await downloadHotspotsCsv(area, windowFrom, windowTo, mapData);
+    setNotice(msg);
+  };
+
+  /* ------------------------------------------------------------------ derived */
+  const rangeLabel = meta ? `${meta.archiveStart.slice(0, 4)}–${meta.latestDate.slice(0, 4)}` : '2000–2025';
+  const isSample = !!(summary?.isFallback || meta?.isFallback);
+  const covered = summary ? summary.coverage !== false : true;
+  const ready = !!(meta && regions && area && windowFrom);
+  const latestYear = summary?.seasonCurve.year ?? meta?.currentYear;
+
+  // The story's answers, recomputed whenever the data changes.
+  const story = useMemo(() => {
+    if (!summary || !area) return null;
+    // Only use a breakdown that belongs to this area's country and to the dates on screen,
+    // so a slower response can never pair one period's ranking with another period's headline.
+    const bd =
+      breakdown &&
+      area.kind === 'region' &&
+      breakdown.countryCode === area.countryCode &&
+      breakdown.from === summary.from &&
+      breakdown.to === summary.to
+        ? breakdown
+        : null;
+    return {
+      now: nowInsight(summary),
+      where: whereInsight(area, bd, mapData),
+      when: whenInsight(summary),
+      year: thisYearInsight(summary),
+      trend: trendInsight(summary),
+      next: nextInsight(summary),
+      trust: trustInsight(summary),
+      breakdown: bd,
+    };
+  }, [summary, area, breakdown, mapData]);
+
+  // Tabs that exist for this area; an unavailable one falls back to the overview.
+  const tabSections = useMemo(
+    () => (!covered || !story ? SECTIONS.slice(0, 2) : SECTIONS.filter((x) => x.id !== 'sec-next' || !!story.next)),
+    [covered, story]
   );
+  const tab = tabSections.some((x) => x.id === activeSec) ? activeSec : 'sec-now';
+
+  const dataStatus = meta ? (
+    <>
+      <i className={`data-dot ${isSample ? 'data-dot--sample' : ''}`} aria-hidden="true" />
+      {isSample ? 'Offline sample · not real readings' : `NASA FIRMS archive · through ${fmtDate(meta.latestDate)}`}
+    </>
+  ) : null;
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {showIntro && <BurnIntro onDismiss={() => setShowIntro(false)} />}
+      {showIntro && <IntroController onLaunch={() => setShowIntro(false)} rangeLabel={rangeLabel} />}
 
-      {/* Sticky Frosted-Obsidian Topbar */}
-      <header className="topbar">
+      <header className={`topbar ${navTab === 'explore' ? 'topbar--static' : ''}`}>
         <div className="brand-lockup">
           <button
             type="button"
             onClick={() => setShowIntro(true)}
-            aria-label="Return to IGNIS home"
-            title="Return to IGNIS home"
+            aria-label="Back to the IGNIS start page"
+            title="Back to the IGNIS start page"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
+              minHeight: 38,
               background: 'transparent',
               border: 'none',
               padding: 0,
               cursor: 'pointer',
+              color: 'var(--text-primary)',
             }}
           >
             <WordmarkSvg height={20} ember />
           </button>
           <span className="brand-lockup__divider" aria-hidden="true" />
-          <span className="brand-lockup__sub">HARMONIZED FIRE CALENDAR · 2000–2026</span>
+          <span className="brand-lockup__sub">HARMONIZED FIRE CALENDAR · {rangeLabel}</span>
         </div>
 
         <nav className="topbar-nav" aria-label="Primary navigation">
           <button
             type="button"
             onClick={() => setNavTab('explore')}
+            aria-current={navTab === 'explore' ? 'page' : undefined}
             className={`nav-tab ${navTab === 'explore' ? 'nav-tab--active' : ''}`}
           >
             Explore
@@ -424,11 +457,11 @@ export default function App() {
           <button
             type="button"
             onClick={() => setNavTab('methods')}
+            aria-current={navTab === 'methods' ? 'page' : undefined}
             className={`nav-tab ${navTab === 'methods' ? 'nav-tab--active' : ''}`}
           >
             Methods &amp; validation
           </button>
-
           <button
             type="button"
             onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
@@ -436,442 +469,324 @@ export default function App() {
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
             title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
           >
-            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </nav>
       </header>
 
       {navTab === 'methods' ? (
-        <Methods meta={meta} />
+        meta ? (
+          <Methods meta={meta} />
+        ) : (
+          <div className="explore">
+            <div className="skeleton" style={{ height: 520 }} aria-hidden="true" />
+          </div>
+        )
       ) : (
-        <div className="explore">
-          {/* Left Sticky Control Rail (340px) */}
-          <aside className="sidebar" aria-label="Fire calendar controls">
-            {/* 01 · AREA OF INTEREST */}
-            <section className="sidebar-card">
-              <h2 className="section-kicker">01 · AREA OF INTEREST</h2>
+        <>
+          {ready && regions && area && meta && (
+            <CommandBar
+              regions={regions}
+              area={area}
+              areaInputMode={areaInputMode}
+              onAreaInputMode={handleAreaInputMode}
+              selectedCountryCode={area.countryCode || ''}
+              selectedProvinceCode={area.provinceCode || ''}
+              onSelectCountry={handleSelectCountry}
+              onSelectProvince={handleSelectProvince}
+              drawTool={drawTool}
+              onDrawTool={setDrawTool}
+              onStartDrawing={handleStartDrawing}
+              onApplyCoords={(lat, lon, rad) => {
+                setAreaInputMode('coords');
+                setArea(circleArea(lat, lon, rad));
+              }}
+              windowFrom={windowFrom}
+              windowTo={windowTo}
+              archiveStart={meta.archiveStart}
+              latestDate={meta.latestDate}
+              activePreset={activePreset}
+              onPreset={handlePreset}
+              onWindow={handleWindow}
+              baselineStart={baselineStart}
+              baselineEnd={baselineEnd}
+              lastFullYear={lastFullYear}
+              onBaseline={(s, e) => {
+                setBaselineStart(s);
+                setBaselineEnd(e);
+              }}
+              colorRamp={colorRamp}
+              onColorRamp={setColorRamp}
+              onExportCalendarCsv={handleExportCalendar}
+              onExportHotspotsCsv={handleExportHotspots}
+              onPrint={() => window.print()}
+              loading={loading}
+            >
+              <SectionNav sections={tabSections} current={tab} onSelect={scrollToSection} status={dataStatus} armed={!!summary} />
+            </CommandBar>
+          )}
 
-              <div
-                className="segmented segmented--3"
-                role="tablist"
-                aria-label="Area selection mode"
-                style={{ marginBottom: 12 }}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={areaInputMode === 'region'}
-                  onClick={() => setAreaInputMode('region')}
-                  className={`segmented__btn ${areaInputMode === 'region' ? 'segmented__btn--active' : ''}`}
-                >
-                  Region
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={areaInputMode === 'draw'}
-                  onClick={() => setAreaInputMode('draw')}
-                  className={`segmented__btn ${areaInputMode === 'draw' ? 'segmented__btn--active' : ''}`}
-                >
-                  Draw on map
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={areaInputMode === 'coords'}
-                  onClick={() => setAreaInputMode('coords')}
-                  className={`segmented__btn ${areaInputMode === 'coords' ? 'segmented__btn--active' : ''}`}
-                >
-                  Coordinates
-                </button>
-              </div>
-
-              {areaInputMode === 'region' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div>
-                    <div className="field-label">Quick-select showcase countries</div>
-                    <div className="chip-grid">
-                      {SHOWCASE_CHIPS.map((chip) => {
-                        const isActive =
-                          area.kind === 'region' && selectedCountryCode === chip.code;
-                        return (
-                          <button
-                            key={chip.code}
-                            type="button"
-                            onClick={() => handleSelectCountry(chip.code)}
-                            className={`region-chip ${isActive ? 'region-chip--active' : ''}`}
-                          >
-                            {chip.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label htmlFor="country-select" className="field-label">
-                      Country
-                    </label>
-                    <select
-                      id="country-select"
-                      className="field-select"
-                      value={selectedCountryCode}
-                      onChange={(e) => handleSelectCountry(e.target.value)}
-                    >
-                      {regions.countries.map((c) => (
-                        <option key={c.code} value={c.code}>
-                          {c.name} ({c.iso3})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label htmlFor="province-select" className="field-label">
-                      Province / Governorate
-                    </label>
-                    <select
-                      id="province-select"
-                      className="field-select"
-                      value={selectedProvinceCode}
-                      onChange={(e) => handleSelectProvince(e.target.value)}
-                    >
-                      <option value="">All of {activeCountry?.name}</option>
-                      {activeCountry?.provinces.map((p) => (
-                        <option key={p.code} value={p.code}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+          <div className="explore">
+            <main id="story-top" className="main" aria-busy={loading && !!summary}>
+              {error && (
+                <div className="notice notice--error no-print" role="alert">
+                  <AlertTriangle size={17} aria-hidden="true" />
+                  <span>{error}</span>
+                  <button type="button" className="notice__close" aria-label="Dismiss" onClick={() => setError(null)}>
+                    ×
+                  </button>
+                </div>
+              )}
+              {notice && (
+                <div className="notice no-print" role="status">
+                  <Info size={17} aria-hidden="true" />
+                  <span>{notice}</span>
+                  <button type="button" className="notice__close" aria-label="Dismiss" onClick={() => setNotice(null)}>
+                    ×
+                  </button>
                 </div>
               )}
 
-              {areaInputMode === 'draw' && (
-                <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-                  <p style={{ margin: '0 0 10px 0' }}>
-                    Use the floating drawing toolbar on the top-right of the map to sketch a custom{' '}
-                    <strong>Polygon</strong>, <strong>Rectangle</strong>, or{' '}
-                    <strong>Circle</strong> AOI.
-                  </p>
-                  <div className="segmented segmented--3">
-                    {(['polygon', 'rectangle', 'circle'] as DrawTool[]).map((tool) => (
-                      <button
-                        key={tool}
-                        type="button"
-                        onClick={() => setDrawTool(tool)}
-                        className={`segmented__btn ${drawTool === tool ? 'segmented__btn--ember' : ''}`}
-                        style={{ textTransform: 'capitalize' }}
-                      >
-                        {tool}
-                      </button>
-                    ))}
-                  </div>
+              {!summary || !area || !meta ? (
+                <div aria-live="polite" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+                  <span className="sr-only">Loading fire data…</span>
+                  <div className="skeleton" style={{ height: 300 }} aria-hidden="true" />
+                  <div className="skeleton" style={{ height: 'clamp(420px, 62vh, 620px)' }} aria-hidden="true" />
+                  <div className="skeleton" style={{ height: 620 }} aria-hidden="true" />
                 </div>
-              )}
-
-              {areaInputMode === 'coords' && (
-                <form
-                  onSubmit={handleApplyCoords}
-                  style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
-                >
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div>
-                      <label htmlFor="coord-lat" className="field-label">
-                        Latitude
-                      </label>
-                      <input
-                        id="coord-lat"
-                        type="number"
-                        step="0.01"
-                        className="field-input font-mono"
-                        value={coordLat}
-                        onChange={(e) => setCoordLat(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="coord-lon" className="field-label">
-                        Longitude
-                      </label>
-                      <input
-                        id="coord-lon"
-                        type="number"
-                        step="0.01"
-                        className="field-input font-mono"
-                        value={coordLon}
-                        onChange={(e) => setCoordLon(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label htmlFor="coord-radius" className="field-label">
-                      Radius (km)
-                    </label>
-                    <input
-                      id="coord-radius"
-                      type="number"
-                      min={5}
-                      max={600}
-                      className="field-input font-mono"
-                      value={coordRadiusKm}
-                      onChange={(e) => setCoordRadiusKm(e.target.value)}
+              ) : (
+                <div className="story-tabs" data-tab={tab}>
+                  <div id="sec-now" data-reveal>
+                    <Headline
+                      summary={summary}
+                      onHoverTooltip={setTooltip}
+                      question={covered ? '01 · Is it burning more than normal?' : undefined}
+                      meaning={story && covered ? story.now.parts : undefined}
                     />
                   </div>
-                  {coordError && (
-                    <div style={{ fontSize: 11.5, color: 'var(--critical)' }}>{coordError}</div>
+
+                  {!covered && regions && (
+                    <div className="notice" role="status">
+                      <Info size={17} aria-hidden="true" />
+                      <div>
+                        <strong>No archive coverage for this area.</strong> Pick one of the covered countries:
+                        <div className="chip-grid" style={{ marginTop: 10 }}>
+                          {regions.countries.map((c) => (
+                            <button key={c.code} type="button" className="region-chip" onClick={() => handleSelectCountry(c.code)}>
+                              {c.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   )}
-                  <button type="submit" className="btn-primary-ember">
-                    Apply Coordinates
-                  </button>
-                </form>
+
+                  {covered && story && (
+                    <Briefing
+                      area={area.label}
+                      onJump={scrollToSection}
+                      items={[
+                        { id: 'sec-where', n: '02', insight: story.where },
+                        { id: 'sec-when', n: '03', insight: story.when },
+                        { id: 'sec-year', n: '04', insight: story.year },
+                        { id: 'sec-trend', n: '05', insight: story.trend },
+                        ...(story.next ? [{ id: 'sec-next', n: '06', insight: story.next }] : []),
+                        { id: 'sec-trust', n: story.next ? '07' : '06', insight: story.trust },
+                      ]}
+                    />
+                  )}
+
+                  <StoryChapter
+                    id="sec-where"
+                    n="02"
+                    question="Where is it burning?"
+                    insight={
+                      story && covered
+                        ? story.where
+                        : { parts: ['The map shows the selected area. There is no archive data here to analyse.'], short: [], facts: [] }
+                    }
+                    hint={
+                      story?.breakdown
+                        ? 'brighter, larger dots mean more days with fire in that square. The bars show each province’s share of the fire; the badge compares it with its own past on the same dates. Click a province to open it.'
+                        : 'brighter, larger dots mean more days with fire in that square. Switch to Map for satellite night lights and true colour.'
+                    }
+                  >
+                    <div className={story?.breakdown && covered ? 'story-grid' : undefined}>
+                      <section className="viz-card" aria-labelledby="viz-title">
+                        <div className="viz-card__head">
+                          <div>
+                            <div className="section-kicker" style={{ marginBottom: 4 }}>
+                              WHERE IT BURNED · {fmtDateRange(windowFrom, windowTo)}
+                            </div>
+                            <h3 id="viz-title">
+                              {mapData
+                                ? `${mapData.hotspots.features.length.toLocaleString('en-US')} grid cells with fire`
+                                : `Fire locations in ${area.label}`}
+                            </h3>
+                          </div>
+                          <div className="segmented segmented--2 no-print" role="group" aria-label="Map or globe">
+                            <button
+                              type="button"
+                              aria-pressed={display === 'globe'}
+                              className={`segmented__btn ${display === 'globe' ? 'segmented__btn--ember' : ''}`}
+                              onClick={() => {
+                                if (areaInputMode === 'draw') setAreaInputMode('region');
+                                setDisplay('globe');
+                              }}
+                            >
+                              3D globe
+                            </button>
+                            <button
+                              type="button"
+                              aria-pressed={display === 'map'}
+                              className={`segmented__btn ${display === 'map' ? 'segmented__btn--ember' : ''}`}
+                              onClick={() => setDisplay('map')}
+                            >
+                              Map
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="viz-card__body">
+                          {showIntro || !mapData ? (
+                            <div className="earth-stage" aria-hidden="true" />
+                          ) : display === 'globe' ? (
+                            <Suspense fallback={<div className="earth-stage" aria-label="Loading the globe" />}>
+                              <GlobeView
+                                area={area}
+                                mapData={mapData}
+                                colorRamp={colorRamp}
+                                from={windowFrom}
+                                to={windowTo}
+                                onCountry={handleSelectCountry}
+                                onMap={() => setDisplay('map')}
+                              />
+                            </Suspense>
+                          ) : (
+                            <MapView
+                              area={area}
+                              mapData={mapData}
+                              basemap={basemap}
+                              onBasemapChange={setBasemap}
+                              theme={theme}
+                              areaInputMode={areaInputMode}
+                              drawTool={drawTool}
+                              onDrawToolChange={setDrawTool}
+                              onSelectCountryCode={handleSelectCountry}
+                              onCustomAreaDrawn={(drawn) => setArea(drawn)}
+                              onHoverTooltip={setTooltip}
+                              latestDate={meta.latestDate}
+                            />
+                          )}
+                        </div>
+                      </section>
+
+                      {story?.breakdown && covered && (
+                        <ProvinceRanking
+                          breakdown={story.breakdown}
+                          selectedId={area.provinceCode}
+                          expanded={rankingExpanded}
+                          onToggle={() => setRankingExpanded((x) => !x)}
+                          onSelect={(pid) => handleSelectProvince(story.breakdown!.countryCode, pid)}
+                        />
+                      )}
+                    </div>
+                  </StoryChapter>
+
+                  {covered && story && (
+                    <>
+                      <StoryChapter
+                        id="sec-when"
+                        n="03"
+                        question="When in the year does it burn?"
+                        insight={story.when}
+                        hint={`each box is the normal range for that month in ${summary.baselineStart}–${summary.baselineEnd} (the line is the median); the dot is ${latestYear}.`}
+                      >
+                        <div className="story-grid">
+                          <Climatology
+                            months={summary.climatology.months}
+                            baselineStart={summary.baselineStart}
+                            baselineEnd={summary.baselineEnd}
+                            year={latestYear}
+                            onHoverTooltip={setTooltip}
+                          />
+                          <RecordMonthsCard summary={summary} />
+                        </div>
+                      </StoryChapter>
+
+                      <StoryChapter
+                        id="sec-year"
+                        n="04"
+                        question={`How is ${latestYear ?? 'this year'} going?`}
+                        insight={story.year}
+                        hint={`the orange line adds up ${latestYear}’s fire day by day. The dashed line is a normal year, and the shaded band holds 8 of every 10 past years. Above the band means an unusually heavy year.`}
+                      >
+                        <div className="story-grid">
+                          <SeasonCurve
+                            days={summary.seasonCurve.days}
+                            daysOffset={summary.seasonCurve.daysOffset}
+                            year={latestYear}
+                            note={summary.seasonCurve.note}
+                            onHoverTooltip={setTooltip}
+                          />
+                          <MonthsVsNormalCard summary={summary} year={latestYear} />
+                        </div>
+                      </StoryChapter>
+
+                      <StoryChapter
+                        id="sec-trend"
+                        n="05"
+                        question="Is it getting worse over time?"
+                        insight={story.trend}
+                        hint="each bar is one year. Grey bars (before 2012) are converted from the older MODIS satellite and carry error whiskers; orange bars come from VIIRS. The dashed line is the long-term trend."
+                      >
+                        <div className="story-grid">
+                          <AnnualChart
+                            annual={summary.calendar.annual}
+                            trend={summary.calendar.trend}
+                            onHoverTooltip={setTooltip}
+                          />
+                          <TopYearsCard summary={summary} />
+                        </div>
+                      </StoryChapter>
+
+                      {story.next && summary.outlook && (
+                        <StoryChapter
+                          id="sec-next"
+                          n="06"
+                          question="What's likely next?"
+                          insight={story.next}
+                          hint="the marker shows the chance that next month ends above its usual level; between 40% and 60% is too close to call. The grid on the right is the honesty check: every forecast the model would have made here, using only earlier data, and whether it came true."
+                        >
+                          <div className="story-grid story-grid--even">
+                            <OutlookCard outlook={summary.outlook} />
+                            <OutlookTrackCard outlook={summary.outlook} areaLabel={area.label} />
+                          </div>
+                        </StoryChapter>
+                      )}
+
+                      <StoryChapter
+                        id="sec-trust"
+                        n={story.next ? '07' : '06'}
+                        question="Can you trust these numbers?"
+                        insight={story.trust}
+                        hint="the long bar shows every raw satellite detection; only the orange part is counted as fire. The report card tests the pre-2012 conversion on 2012–2017, when both satellites were flying."
+                      >
+                        <div className="story-grid story-grid--even">
+                          <ExclusionsCard summary={summary} />
+                          <ReportCard summary={summary} />
+                        </div>
+                      </StoryChapter>
+                    </>
+                  )}
+                  <StoryPager sections={tabSections} current={tab} onSelect={scrollToSection} />
+                </div>
               )}
-            </section>
-
-            {/* 02 · MAP & EXPORT WINDOW */}
-            <section className="sidebar-card">
-              <h2 className="section-kicker">02 · MAP &amp; EXPORT WINDOW</h2>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 8,
-                  marginBottom: 10,
-                }}
-              >
-                <div>
-                  <label htmlFor="window-from" className="field-label">
-                    From
-                  </label>
-                  <input
-                    id="window-from"
-                    type="date"
-                    className="field-input font-mono"
-                    value={windowFrom}
-                    min={meta.archiveStart}
-                    max={windowTo}
-                    onChange={(e) => {
-                      setSelectedMonthKey(null);
-                      setWindowFrom(e.target.value);
-                    }}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="window-to" className="field-label">
-                    To
-                  </label>
-                  <input
-                    id="window-to"
-                    type="date"
-                    className="field-input font-mono"
-                    value={windowTo}
-                    min={windowFrom}
-                    max={meta.latestDate}
-                    onChange={(e) => {
-                      setSelectedMonthKey(null);
-                      setWindowTo(e.target.value);
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => handlePresetWindow('30d')}
-                  className="btn-secondary"
-                  style={{ fontSize: 11.5, padding: '0 6px' }}
-                >
-                  Last 30 days
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handlePresetWindow('12m')}
-                  className="btn-secondary"
-                  style={{ fontSize: 11.5, padding: '0 6px' }}
-                >
-                  Last 12 mo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handlePresetWindow('5y')}
-                  className="btn-secondary"
-                  style={{ fontSize: 11.5, padding: '0 6px' }}
-                >
-                  Last 5 yrs
-                </button>
-              </div>
-            </section>
-
-            {/* 03 · BASELINE & COLOR RAMP */}
-            <section className="sidebar-card">
-              <h2 className="section-kicker">03 · BASELINE &amp; COLOR RAMP</h2>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 8,
-                  marginBottom: 12,
-                }}
-              >
-                <div>
-                  <label htmlFor="baseline-start" className="field-label">
-                    Baseline start
-                  </label>
-                  <input
-                    id="baseline-start"
-                    type="number"
-                    min={2000}
-                    max={2024}
-                    className="field-input font-mono"
-                    value={baselineStart}
-                    onChange={(e) =>
-                      setBaselineStart(Math.max(2000, Math.min(2024, Number(e.target.value) || 2001)))
-                    }
-                  />
-                </div>
-                <div>
-                  <label htmlFor="baseline-end" className="field-label">
-                    Baseline end
-                  </label>
-                  <input
-                    id="baseline-end"
-                    type="number"
-                    min={2001}
-                    max={2025}
-                    className="field-input font-mono"
-                    value={baselineEnd}
-                    onChange={(e) =>
-                      setBaselineEnd(Math.max(2001, Math.min(2025, Number(e.target.value) || 2025)))
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="field-label">Heatmap palette</div>
-              <div className="segmented segmented--2" role="group" aria-label="Color ramp selector">
-                <button
-                  type="button"
-                  onClick={() => setColorRamp('fire')}
-                  className={`segmented__btn ${colorRamp === 'fire' ? 'segmented__btn--active' : ''}`}
-                >
-                  Fire heat
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setColorRamp('cividis')}
-                  className={`segmented__btn ${colorRamp === 'cividis' ? 'segmented__btn--active' : ''}`}
-                >
-                  Cividis (CV-safe)
-                </button>
-              </div>
-            </section>
-
-            {/* 04 · EXPORT BRIEFING */}
-            <section className="sidebar-card">
-              <h2 className="section-kicker">04 · EXPORT BRIEFING</h2>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => downloadCalendarCsv(summary)}
-                  className="btn-secondary"
-                >
-                  <Download size={13} />
-                  Calendar CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => downloadHotspotsCsv(area, windowFrom, windowTo, mapData)}
-                  className="btn-secondary"
-                >
-                  <Download size={13} />
-                  Hotspots CSV
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={handleExportPng}
-                className="btn-secondary"
-                style={{ width: '100%', marginBottom: 8 }}
-              >
-                <ImageIcon size={13} />
-                Calendar PNG
-              </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="btn-primary-ember"
-                style={{ width: '100%' }}
-              >
-                <Printer size={14} />
-                Print briefing
-              </button>
-            </section>
-          </aside>
-
-          {/* Main Analytical Canvas */}
-          <main className="main" aria-busy={loading}>
-            <Headline summary={summary} onHoverTooltip={setTooltip} />
-
-            {!showIntro && (<div>
-              <div className="visualization-switch"><button aria-pressed={display === 'map'} onClick={() => setDisplay('map')}>Map</button><button aria-pressed={display === 'globe'} onClick={() => { setAreaInputMode('region'); setDisplay('globe'); }}>3D Globe</button><small>One dataset. Two perspectives.</small></div>
-              {display === 'globe' ? <Suspense fallback={<div className="earth-stage">Loading Earth…</div>}><GlobeView area={area} mapData={mapData} colorRamp={colorRamp} from={windowFrom} to={windowTo} onCountry={handleSelectCountry} onMap={() => setDisplay('map')} /></Suspense> : <MapView
-                area={area}
-                mapData={mapData}
-                basemap={basemap}
-                onBasemapChange={setBasemap}
-                theme={theme}
-                areaInputMode={areaInputMode}
-                drawTool={drawTool}
-                onDrawToolChange={setDrawTool}
-                onSelectCountryCode={handleSelectCountry}
-                onCustomAreaDrawn={(drawn) => setArea(drawn)}
-                onHoverTooltip={setTooltip}
-                latestDate={meta.latestDate}
-              />}
-            </div>)}
-
-            <CalendarHeatmap
-              summary={summary}
-              viewMode={viewMode}
-              onViewModeChange={setViewMode}
-              colorRamp={colorRamp}
-              theme={theme}
-              selectedMonthKey={selectedMonthKey}
-              onSelectMonth={handleSelectMonthFromCalendar}
-              onHoverTooltip={setTooltip}
-              svgRef={calendarSvgRef}
-            />
-
-            {/* 2-Column Analytics Bento Grid */}
-            <div className="analytics-grid">
-              <SeasonCurve
-                days={summary.seasonCurve.days}
-                daysOffset={summary.seasonCurve.daysOffset}
-                onHoverTooltip={setTooltip}
-              />
-              <AnnualChart
-                annual={summary.calendar.annual}
-                trend={summary.calendar.trend}
-                onHoverTooltip={setTooltip}
-              />
-            </div>
-
-            <div className="analytics-grid">
-              <Climatology
-                months={summary.climatology.months}
-                baselineStart={summary.baselineStart}
-                baselineEnd={summary.baselineEnd}
-                onHoverTooltip={setTooltip}
-              />
-              <ReportCard summary={summary} />
-            </div>
-
-            <ExclusionsCard summary={summary} />
-          </main>
-        </div>
+            </main>
+          </div>
+        </>
       )}
 
-      {/* Subtle Footer */}
       <footer
         className="no-print"
         style={{
@@ -887,24 +802,12 @@ export default function App() {
           color: 'var(--text-muted)',
         }}
       >
-        <span>
-          IGNIS · Harmonized MODIS C6.1 &amp; VIIRS 375 m Fire Calendar · NASA Space Apps Challenge 2026
+        <span>IGNIS · harmonized MODIS &amp; VIIRS fire calendar · NASA Space Apps Challenge 2026</span>
+        <span className="font-mono" style={{ fontSize: 11 }}>
+          {isSample
+            ? 'Offline sample shown. Start the data server for the real archive.'
+            : 'Data: NASA FIRMS active fire archive (MODIS, VIIRS S-NPP, VIIRS NOAA-20)'}
         </span>
-        {summary.isFallback && (
-          <span
-            className="font-mono"
-            style={{
-              padding: '5px 12px',
-              borderRadius: 10,
-              background: 'var(--surface-1)',
-              border: '1px solid var(--border)',
-              fontSize: 11,
-              color: 'var(--text-secondary)',
-            }}
-          >
-            Preview dataset · connect FastAPI backend for 16.5M full archive
-          </span>
-        )}
       </footer>
 
       <Tooltip tooltip={tooltip} />

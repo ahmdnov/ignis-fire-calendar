@@ -1,41 +1,56 @@
 import type { SummaryResponse } from '../types';
-import { fmtNum, fmtRatio, gradeColor, ordinal } from '../util';
+import { fmtDate, fmtDateRange, fmtNum, fmtRatio, gradeColor, ordinal } from '../util';
 import { HistoryStrip, SeamMini } from './Charts';
+import { Rich } from './Story';
+import type { Part } from '../insights';
 import type { TooltipState } from './Tooltip';
 
 interface HeadlineProps {
   summary: SummaryResponse;
   onHoverTooltip: (tip: TooltipState | null) => void;
+  /** chapter question shown above the area name */
+  question?: string;
+  /** one line that puts the numbers in context */
+  meaning?: Part[];
 }
 
-export function Headline({ summary, onHoverTooltip }: HeadlineProps) {
+const dash = (v: number, fmt: (n: number) => string) => (Number.isFinite(v) ? fmt(v) : '—');
+
+/** The answer, first: is this area burning more or less than normal for these dates? */
+export function Headline({ summary, onHoverTooltip, question, meaning }: HeadlineProps) {
   const { headline, area, from, to, latestDate } = summary;
   const generatedStr = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  const covered = summary.coverage !== false;
 
   return (
-    <section className="bento-card" aria-labelledby="headline-area-title">
+    <section className="bento-card headline-card" aria-labelledby="headline-area-title">
       <div className="print-only-header">
         <span>IGNIS fire briefing · generated {generatedStr}</span>
-        <span>data through {latestDate} · NASA FIRMS (MODIS C6.1 + VIIRS 375 m)</span>
+        <span>data through {latestDate} · NASA FIRMS (MODIS + VIIRS 375 m), harmonized</span>
       </div>
 
-      <div className="headline-split">
+      <div className="headline-split" style={covered ? undefined : { gridTemplateColumns: '1fr' }}>
         <div>
+          <div className="section-kicker" style={{ marginBottom: 8 }}>
+            {question ? `${question.toUpperCase()} · ` : ''}
+            {fmtDateRange(from, to)}
+            {summary.isFallback ? ' · OFFLINE SAMPLE, NOT REAL READINGS' : ''}
+          </div>
           <div
             style={{
               display: 'flex',
               flexWrap: 'wrap',
               alignItems: 'center',
               gap: 10,
-              marginBottom: 8,
+              marginBottom: 10,
             }}
           >
             <h1
               id="headline-area-title"
-              className="display-heading text-blur-reveal"
+              className="display-heading"
               style={{
                 margin: 0,
-                fontSize: 'clamp(1.5rem, 2.4vw, 1.85rem)',
+                fontSize: 'clamp(1.6rem, 2.6vw, 2.1rem)',
                 fontWeight: 700,
                 letterSpacing: '-0.032em',
                 color: 'var(--text-primary)',
@@ -44,78 +59,94 @@ export function Headline({ summary, onHoverTooltip }: HeadlineProps) {
             >
               {area.label}
             </h1>
-            <span className={`status-badge status-badge--${headline.status}`}>
-              {headline.statusLabel}
-            </span>
+            <span className={`status-badge status-badge--${headline.status}`}>{headline.statusLabel}</span>
           </div>
 
-          <p
-            style={{
-              margin: '0 0 16px 0',
-              fontSize: 14.5,
-              lineHeight: 1.6,
-              color: 'var(--text-secondary)',
-              maxWidth: '68ch',
-            }}
-          >
-            {headline.sentence}
-          </p>
+          {/* The plain-language "meaning" line replaces the long statistical sentence when there is one. */}
+          {!(meaning && meaning.length > 0) && (
+            <p
+              style={{
+                margin: '0 0 18px 0',
+                fontSize: 15,
+                lineHeight: 1.62,
+                color: 'var(--text-secondary)',
+                maxWidth: '70ch',
+              }}
+            >
+              {headline.sentence}
+            </p>
+          )}
 
+          {meaning && meaning.length > 0 && (
+            <p className="headline__meaning">
+              <span className="headline__meaning-label">What this means</span>
+              <span>
+                <Rich parts={meaning} />
+              </span>
+            </p>
+          )}
+
+          {covered && (
+            <div className="kpi-grid">
+              <div className="kpi-tile">
+                <div className="kpi-tile__label">Vs. normal</div>
+                <div className="kpi-tile__value">{dash(headline.ratio, fmtRatio)}</div>
+                <div className="kpi-tile__sub">
+                  {dash(headline.currentWindowCount, (n) => fmtNum(n))} vs usual {dash(headline.medianWindowCount, (n) => fmtNum(n))}
+                </div>
+              </div>
+              <div className="kpi-tile">
+                <div className="kpi-tile__label">Percentile</div>
+                <div className="kpi-tile__value">{dash(headline.percentile, (n) => ordinal(Math.round(n)))}</div>
+                <div className="kpi-tile__sub">vs {headline.baselineSpan || `${summary.baselineStart}–${summary.baselineEnd}`}</div>
+              </div>
+              <div className="kpi-tile">
+                <div className="kpi-tile__label">Rank</div>
+                <div className="kpi-tile__value">
+                  {Number.isFinite(headline.rank) ? `#${headline.rank}` : '—'}
+                </div>
+                <div className="kpi-tile__sub">of {headline.totalYears} years</div>
+              </div>
+            </div>
+          )}
+
+          {covered && !(meaning && meaning.length > 0) && (
+            <div
+              className="font-mono"
+              style={{
+                fontSize: 11,
+                color: 'var(--text-muted)',
+                marginTop: 14,
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '4px 10px',
+              }}
+            >
+              <span>{dash(headline.currentWindowCount, (n) => fmtNum(n))} harmonized hotspot-days</span>
+              <span aria-hidden="true">·</span>
+              <span>area {fmtNum(area.areaKm2)} km²</span>
+              <span aria-hidden="true">·</span>
+              <span>archive through {fmtDate(latestDate)}</span>
+            </div>
+          )}
+        </div>
+
+        {covered && headline.historyStrip.length > 0 && (
           <div
-            className="font-mono"
             style={{
-              fontSize: 11,
-              color: 'var(--text-muted)',
-              marginBottom: 16,
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 10,
+              padding: '14px 16px',
+              borderRadius: 14,
+              background: 'color-mix(in srgb, var(--page) 70%, transparent)',
+              border: '1px solid var(--border)',
             }}
           >
-            <span>Window: {from} → {to}</span>
-            <span aria-hidden="true">·</span>
-            <span>Area: {fmtNum(area.areaKm2)} km²</span>
-            <span aria-hidden="true">·</span>
-            <span>Observed: {fmtNum(headline.currentWindowCount)} harmonized</span>
+            <HistoryStrip
+              points={headline.historyStrip}
+              medianValue={headline.medianWindowCount}
+              onHoverTooltip={onHoverTooltip}
+            />
           </div>
-
-          <div className="kpi-grid">
-            <div className="kpi-tile">
-              <div className="kpi-tile__label">Ratio vs. median</div>
-              <div className="kpi-tile__value">{fmtRatio(headline.ratio)}</div>
-              <div className="kpi-tile__sub">Median {fmtNum(headline.medianWindowCount)}</div>
-            </div>
-            <div className="kpi-tile">
-              <div className="kpi-tile__label">Historical percentile</div>
-              <div className="kpi-tile__value">{ordinal(headline.percentile)}</div>
-              <div className="kpi-tile__sub">
-                {summary.baselineStart}–{summary.baselineEnd} baseline
-              </div>
-            </div>
-            <div className="kpi-tile">
-              <div className="kpi-tile__label">Rank</div>
-              <div className="kpi-tile__value">
-                #{headline.rank} / {headline.totalYears}
-              </div>
-              <div className="kpi-tile__sub">Since 2001 archive</div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '14px 16px',
-            borderRadius: 14,
-            background: 'var(--page)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <HistoryStrip
-            points={headline.historyStrip}
-            medianValue={headline.medianWindowCount}
-            onHoverTooltip={onHoverTooltip}
-          />
-        </div>
+        )}
       </div>
     </section>
   );
@@ -125,14 +156,33 @@ interface ReportCardProps {
   summary: SummaryResponse;
 }
 
+const GRADE_TEXT: Record<string, string> = {
+  Good: 'Before 2012, the scaled MODIS record closely matches what VIIRS would have seen here.',
+  Fair: 'Before 2012, values are usable for trends and seasons, with moderate year-to-year error.',
+  Poor: 'MODIS missed many of the small fires here, so values before 2012 are unreliable.',
+  Insufficient: 'Too few fires in 2012–2017 to test the method here. Treat values before 2012 as indicative.',
+};
+
+const GRADE_ICON: Record<string, string> = { Good: '✓', Fair: '~', Poor: '!', Insufficient: '?' };
+
 export function ReportCard({ summary }: ReportCardProps) {
   const { reportCard } = summary;
   const gColor = gradeColor(reportCard.grade);
+  const pct = (v: number, signed = false) =>
+    Number.isFinite(v) ? `${signed && v >= 0 ? '+' : ''}${v.toFixed(1)}%` : '—';
+  const k = (v: number) => (Number.isFinite(v) ? v.toFixed(2) : '—');
+
+  const tile = {
+    padding: '12px 14px',
+    borderRadius: 12,
+    background: 'var(--page)',
+    border: '1px solid var(--border)',
+  } as const;
 
   return (
     <section className="bento-card" aria-labelledby="report-card-heading">
       <div className="section-kicker" style={{ marginBottom: 4 }}>
-        PER-AREA HARMONIZATION REPORT CARD
+        CAN YOU TRUST THE YEARS BEFORE 2012 HERE?
       </div>
       <div
         style={{
@@ -140,15 +190,15 @@ export function ReportCard({ summary }: ReportCardProps) {
           justifyContent: 'space-between',
           alignItems: 'center',
           gap: 10,
-          marginBottom: 14,
+          marginBottom: 8,
         }}
       >
         <h3
           id="report-card-heading"
-          className="section-heading text-blur-reveal"
+          className="section-heading"
           style={{ margin: 0, fontSize: 17, fontWeight: 700, letterSpacing: '-0.024em' }}
         >
-          Cross-sensor calibration fit
+          Harmonization report card
         </h3>
         <span
           className="font-mono"
@@ -160,11 +210,16 @@ export function ReportCard({ summary }: ReportCardProps) {
             color: gColor,
             background: `color-mix(in srgb, ${gColor} 12%, transparent)`,
             border: `1px solid color-mix(in srgb, ${gColor} 35%, transparent)`,
+            whiteSpace: 'nowrap',
           }}
         >
-          GRADE · {reportCard.grade.toUpperCase()}
+          {GRADE_ICON[reportCard.grade] || '?'} {reportCard.grade.toUpperCase()}
         </span>
       </div>
+
+      <p style={{ margin: '0 0 14px 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+        {GRADE_TEXT[reportCard.grade] || GRADE_TEXT.Insufficient}
+      </p>
 
       <div
         style={{
@@ -174,57 +229,29 @@ export function ReportCard({ summary }: ReportCardProps) {
           marginBottom: 14,
         }}
       >
-        <div
-          style={{
-            padding: '12px 14px',
-            borderRadius: 12,
-            background: 'var(--page)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>
-            Mean annual error
-          </div>
+        <div style={tile}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>Yearly error</div>
           <div className="font-mono" style={{ fontSize: 18, fontWeight: 600 }}>
-            {reportCard.meanAnnualErrorPct.toFixed(1)}%
+            {pct(reportCard.meanAnnualErrorPct)}
           </div>
         </div>
-
-        <div
-          style={{
-            padding: '12px 14px',
-            borderRadius: 12,
-            background: 'var(--page)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>
-            Median seam bias
-          </div>
+        <div style={tile}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>Bias</div>
           <div className="font-mono" style={{ fontSize: 18, fontWeight: 600 }}>
-            {reportCard.biasPct >= 0 ? '+' : ''}
-            {reportCard.biasPct.toFixed(1)}%
+            {pct(reportCard.biasPct, true)}
           </div>
         </div>
-
-        <div
-          style={{
-            padding: '12px 14px',
-            borderRadius: 12,
-            background: 'var(--page)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>
-            Scale factors (k)
-          </div>
+        <div style={tile}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>MODIS → VIIRS factor</div>
           <div className="font-mono" style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.45 }}>
-            Aq {reportCard.kAqua.toFixed(2)} · Te {reportCard.kTerra.toFixed(2)}
+            Aqua ×{k(reportCard.kAqua)}
+            <br />
+            Terra ×{k(reportCard.kTerra)}
           </div>
         </div>
       </div>
 
-      <SeamMini seamOverlap={reportCard.seamOverlap} />
+      {reportCard.seamOverlap.length > 0 && <SeamMini seamOverlap={reportCard.seamOverlap} />}
     </section>
   );
 }
@@ -238,81 +265,57 @@ export function ExclusionsCard({ summary }: ExclusionsCardProps) {
   const total = Math.max(1, exclusions.totalRaw);
 
   const segments = [
-    {
-      label: 'Kept vegetation fires',
-      count: exclusions.keptVegetation,
-      pct: (exclusions.keptVegetation / total) * 100,
-      color: 'var(--series-2)',
-    },
-    {
-      label: 'Gas flares',
-      count: exclusions.gasFlares,
-      pct: (exclusions.gasFlares / total) * 100,
-      color: 'var(--excl-flare)',
-    },
-    {
-      label: 'Static industrial',
-      count: exclusions.staticIndustrial,
-      pct: (exclusions.staticIndustrial / total) * 100,
-      color: 'var(--excl-static)',
-    },
-    {
-      label: 'Low confidence',
-      count: exclusions.lowConfidence,
-      pct: (exclusions.lowConfidence / total) * 100,
-      color: 'var(--excl-lowconf)',
-    },
-    {
-      label: 'Volcanic / thermal',
-      count: exclusions.volcanic,
-      pct: (exclusions.volcanic / total) * 100,
-      color: 'var(--excl-volcano)',
-    },
-  ];
+    { label: 'Kept: vegetation fires', count: exclusions.keptVegetation, color: 'var(--series-2)' },
+    { label: 'Industry & gas flares (NASA type flag)', count: exclusions.gasFlares, color: 'var(--excl-flare)' },
+    { label: 'Always-hot cells (60+ days, 6+ years)', count: exclusions.staticIndustrial, color: 'var(--excl-static)' },
+    { label: 'Low confidence', count: exclusions.lowConfidence, color: 'var(--excl-lowconf)' },
+    { label: 'Volcano / offshore', count: exclusions.volcanic, color: 'var(--excl-volcano)' },
+  ].map((s) => ({ ...s, pct: (s.count / total) * 100 }));
 
   return (
     <section className="bento-card" aria-labelledby="exclusions-heading">
       <div className="section-kicker" style={{ marginBottom: 4 }}>
-        INDUSTRIAL FLARE &amp; NOISE SCREENING
+        WHAT WAS SCREENED OUT · {fmtDateRange(summary.from, summary.to)}
       </div>
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'baseline',
+          flexWrap: 'wrap',
           gap: 12,
           marginBottom: 10,
         }}
       >
         <h3
           id="exclusions-heading"
-          className="section-heading text-blur-reveal"
+          className="section-heading"
           style={{ margin: 0, fontSize: 17, fontWeight: 700, letterSpacing: '-0.024em' }}
         >
           Not every hotspot is a fire
         </h3>
         <span className="font-mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>
-          {exclusions.excludedPct}% excluded
+          {exclusions.totalRaw > 0 ? `${exclusions.excludedPct}% excluded` : 'no detections'}
         </span>
       </div>
 
-      <p style={{ margin: '0 0 14px 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-        Persistent oil &amp; gas flares, refineries, and static thermal anomalies are filtered out
-        using multi-year spatial persistence masks before calibration so vegetation trends stay clean.
+      <p style={{ margin: '0 0 14px 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)', maxWidth: '86ch' }}>
+        Satellites also see gas flares, refineries and other hot industry. Of {fmtNum(exclusions.totalRaw)} raw
+        detections in this area and period, {fmtNum(exclusions.keptVegetation)} are counted as vegetation fire. The
+        rest are removed before any counting, so oil fields do not look like wildfires.
       </p>
 
-      {/* 5-segment horizontal stacked bar with 1px --page gaps */}
       <div
         role="img"
-        aria-label={`Hotspot classification breakdown: ${exclusions.excludedPct}% excluded as non-vegetation sources`}
+        aria-label={`Of ${fmtNum(exclusions.totalRaw)} detections, ${exclusions.excludedPct}% were excluded as not vegetation fire`}
         style={{
           display: 'flex',
           width: '100%',
           height: 20,
           borderRadius: 6,
           overflow: 'hidden',
-          gap: 1,
-          background: 'var(--page)',
+          gap: 2,
+          background: 'var(--surface-1)',
           marginBottom: 14,
         }}
       >
@@ -322,11 +325,7 @@ export function ExclusionsCard({ summary }: ExclusionsCardProps) {
               <div
                 key={seg.label}
                 title={`${seg.label}: ${seg.pct.toFixed(1)}% (${fmtNum(seg.count)})`}
-                style={{
-                  width: `${seg.pct}%`,
-                  background: seg.color,
-                  height: '100%',
-                }}
+                style={{ width: `${seg.pct}%`, background: seg.color, height: '100%' }}
               />
             )
         )}
@@ -335,8 +334,8 @@ export function ExclusionsCard({ summary }: ExclusionsCardProps) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          gap: '7px 14px',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))',
+          gap: '7px 28px',
         }}
       >
         {segments.map((seg) => (
@@ -346,25 +345,18 @@ export function ExclusionsCard({ summary }: ExclusionsCardProps) {
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              fontSize: 12,
-              paddingBottom: 4,
+              gap: 10,
+              fontSize: 12.5,
+              paddingBottom: 5,
               borderBottom: '1px solid var(--border)',
             }}
           >
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: 'var(--text-secondary)' }}>
-              <span
-                style={{
-                  width: 9,
-                  height: 9,
-                  borderRadius: 2,
-                  background: seg.color,
-                  flexShrink: 0,
-                }}
-              />
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: seg.color, flexShrink: 0 }} />
               {seg.label}
             </span>
-            <span className="font-mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-              {seg.pct.toFixed(1)}%
+            <span className="font-mono" style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+              {seg.pct.toFixed(1)}% · {fmtNum(seg.count)}
             </span>
           </div>
         ))}

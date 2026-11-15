@@ -1,2 +1,136 @@
-.earth-stage{height:680px;position:relative;overflow:hidden;border:1px solid #2a3545;border-radius:16px;background:radial-gradient(ellipse at 50% 45%,#15293c 0%,#070e18 55%,#02060b 100%);color:#e9f2f8}.earth-canvas{position:absolute;inset:0;touch-action:none}.earth-canvas canvas{display:block}.earth-title{position:absolute;top:28px;left:28px;pointer-events:none;text-shadow:0 2px 18px #000}.earth-title>span{font-size:10px;letter-spacing:3px;color:#f4b879}.earth-title h2{font-size:30px;font-weight:450;margin:12px 0;letter-spacing:-1px}.earth-title p{font-size:12px;color:#afc0d0}.earth-title p span{color:#e0a469;margin:0 8px}.earth-data{position:absolute;right:24px;top:28px;font-size:9px;letter-spacing:1px;color:#f0bc7f}.earth-data i{display:inline-block;width:5px;height:5px;background:#e6aa67;border-radius:50%;margin-right:7px}.earth-data small{display:block;font-size:11px;color:#a9bdd0;letter-spacing:0;margin-top:10px;text-align:right}.earth-tools{position:absolute;right:20px;bottom:96px;display:flex;gap:5px;flex-wrap:wrap;max-width:260px;justify-content:flex-end}.earth-tools button,.earth-error button{background:#102235eb;border:1px solid #476077;border-radius:6px;color:#e9f2f8;padding:9px 12px;cursor:pointer}.earth-tools button:hover,.earth-tools button[aria-pressed=true]{background:#344c60}.earth-foot{position:absolute;bottom:16px;left:24px;font-size:10px;color:#a2b5c9;line-height:1.8;pointer-events:none}.earth-key{position:absolute;bottom:82px;left:24px;width:260px;pointer-events:none}.earth-key>span{display:block;height:4px;border-radius:5px}.earth-key small{display:flex;justify-content:space-between;font-size:8px;color:#b9c9d8;margin-top:8px;gap:10px}.earth-key b{font-weight:500;white-space:nowrap}.earth-reading{position:absolute;right:22px;top:130px;background:#0d1b2ef2;border:1px solid #577188;border-radius:12px;padding:22px;display:flex;flex-direction:column;gap:8px}.earth-reading strong{font-size:32px;color:#ffca87}.earth-reading small{color:#adbdcd;font-size:11px}.earth-reading button{position:absolute;right:5px;top:3px;background:none;border:0;color:white;cursor:pointer;font-size:20px}.earth-error{position:absolute;inset:30% 15%;background:#0e2035;padding:30px;display:flex;gap:20px;flex-direction:column;justify-content:center;text-align:center}.earth-empty{position:absolute;bottom:150px;left:24px;font-size:12px;color:#c7d5df}.visualization-switch{display:flex;align-items:center;gap:6px;margin-bottom:10px}.visualization-switch button{padding:9px 16px;border:1px solid var(--border);border-radius:7px;background:var(--surface-1);color:inherit;cursor:pointer}.visualization-switch button[aria-pressed=true]{background:#a64825;color:#fff;border-color:#b96539}.visualization-switch small{margin-left:auto;color:var(--text-secondary);font-size:11px}@media(max-width:700px){.earth-stage{height:640px}.earth-title{left:18px;top:24px}.earth-title h2{font-size:24px}.earth-data{top:125px;left:18px;right:auto}.earth-data small{text-align:left}.earth-tools{bottom:140px;left:14px;right:auto;max-width:none}.earth-key{bottom:95px;left:18px}.earth-foot{left:18px;right:18px;font-size:9px}.earth-reading{top:180px}.visualization-switch small{display:none}}
-.earth-stage{background:radial-gradient(ellipse at 48% 44%,#171718 0%,#08090b 52%,#020304 100%);border-color:#33302c}.earth-tools button{background:#18191de8;border-color:#514638}.earth-tools button:hover{background:#4a2f1d}.earth-title>span{color:#f59e0b}.earth-key{filter:drop-shadow(0 0 8px #ea580c33)}
+/* The globe stage is always dark (it is the Earth in space), in both themes.
+   Colours follow the IGNIS landing palette: obsidian, warm ash, ember. */
+.earth-stage {
+  height: clamp(420px, 62vh, 620px);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 237, 213, 0.12);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 108%, rgba(234, 88, 12, 0.14) 0%, rgba(9, 9, 11, 0) 60%),
+    radial-gradient(ellipse at 48% 44%, #171514 0%, #0a0909 52%, #030303 100%);
+  color: #FAFAF9;
+}
+.earth-canvas { position: absolute; inset: 0; touch-action: none; }
+.earth-canvas canvas { display: block; }
+
+.earth-data {
+  position: absolute;
+  left: 20px;
+  top: 18px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #F5B45C;
+  pointer-events: none;
+  text-shadow: 0 1px 10px #000;
+}
+.earth-data i { display: inline-block; width: 6px; height: 6px; background: #F59E0B; border-radius: 50%; margin-right: 8px; }
+.earth-data small { display: block; font-size: 11.5px; color: #B5AEA8; letter-spacing: 0; margin-top: 7px; }
+
+.earth-tools {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: 300px;
+  justify-content: flex-end;
+}
+.earth-tools button,
+.earth-error button {
+  min-width: 40px;
+  min-height: 40px;
+  background: rgba(17, 13, 11, 0.86);
+  border: 1px solid rgba(255, 237, 213, 0.18);
+  border-radius: 10px;
+  color: #FAFAF9;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.earth-tools button:hover { background: #3B1E0D; border-color: rgba(245, 158, 11, 0.5); }
+.earth-tools button[aria-pressed=true] { background: linear-gradient(135deg, #F59E0B 0%, #EA580C 100%); color: #09090B; border-color: transparent; }
+
+.earth-foot { position: absolute; bottom: 16px; left: 20px; right: 330px; font-size: 11px; color: #8C857F; line-height: 1.7; pointer-events: none; }
+.earth-key { position: absolute; bottom: 70px; left: 20px; width: 330px; pointer-events: none; filter: drop-shadow(0 0 8px rgba(234, 88, 12, 0.2)); }
+.earth-key > span { display: block; height: 5px; border-radius: 5px; }
+.earth-key small { display: flex; justify-content: space-between; white-space: nowrap; font-size: 10px; color: #B5AEA8; margin-top: 7px; gap: 10px; }
+.earth-key b { font-weight: 600; white-space: nowrap; color: #D6CFC9; }
+
+.earth-reading {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  min-width: 190px;
+  background: rgba(17, 13, 11, 0.94);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.earth-reading strong { font-family: var(--font-mono); font-size: 30px; line-height: 1; color: #FFCB5C; }
+.earth-reading span { font-size: 12px; color: #D6CFC9; }
+.earth-reading small { font-family: var(--font-mono); color: #8C857F; font-size: 11px; }
+.earth-reading button { position: absolute; right: 2px; top: 0; width: 36px; height: 36px; background: none; border: 0; color: #B5AEA8; cursor: pointer; font-size: 20px; }
+
+.earth-error { position: absolute; inset: 30% 15%; background: #110D0B; border: 1px solid rgba(255, 237, 213, 0.18); border-radius: 14px; padding: 30px; display: flex; gap: 20px; flex-direction: column; justify-content: center; text-align: center; }
+.earth-empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%, 150px); padding: 8px 14px; border-radius: 9999px; background: rgba(17, 13, 11, 0.86); border: 1px solid rgba(255, 237, 213, 0.18); font-size: 12.5px; color: #D6CFC9; white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .earth-stage { height: 480px; }
+  .earth-data { left: 14px; top: 14px; }
+  .earth-tools { right: 10px; bottom: 10px; left: 10px; max-width: none; justify-content: flex-start; }
+  .earth-key { bottom: 112px; left: 14px; width: min(300px, calc(100% - 28px)); }
+  .earth-foot { display: none; }
+  .earth-reading { right: 10px; top: 54px; }
+}
+
+/* Full-screen button and mode */
+.earth-full {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 12px;
+  background: rgba(17, 13, 11, 0.86);
+  border: 1px solid rgba(255, 237, 213, 0.18);
+  border-radius: 10px;
+  color: #FAFAF9;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.earth-full:hover { background: #3B1E0D; border-color: rgba(245, 158, 11, 0.5); }
+.earth-full[aria-pressed=true] { background: linear-gradient(135deg, #F59E0B 0%, #EA580C 100%); color: #09090B; border-color: transparent; }
+
+.earth-stage--full,
+.earth-stage:fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+/* keep the reading card clear of the button */
+.earth-reading { top: 68px; }
+
+@media (max-width: 640px) {
+  .earth-full span { display: none; }
+  .earth-full { top: 10px; right: 10px; min-width: 40px; justify-content: center; }
+}

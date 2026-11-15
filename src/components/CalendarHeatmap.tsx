@@ -8,7 +8,16 @@ import type {
   SummaryResponse,
   ThemeMode,
 } from '../types';
-import { fmtCompact, fmtNum, MONTH_FULL, MONTH_NAMES } from '../util';
+import {
+  CIVIDIS_STOPS,
+  FIRE_STOPS,
+  fireColor,
+  fmtCompact,
+  fmtNum,
+  MONTH_FULL,
+  MONTH_NAMES,
+  rampGradientCss,
+} from '../util';
 import type { TooltipState } from './Tooltip';
 
 interface CalendarHeatmapProps {
@@ -67,9 +76,10 @@ export function CalendarHeatmap({
     );
 
     if (viewMode === 'anom') {
-      const divCool = theme === 'light' ? '#0369A1' : '#38BDF8';
-      const divMid = theme === 'light' ? '#E4E4E7' : '#27272A';
-      const divWarm = theme === 'light' ? '#DC2626' : '#EF4444';
+      // smoke-blue (below normal) <- neutral -> ember (above normal); same values as the CSS tokens
+      const divCool = theme === 'light' ? '#4B6A8C' : '#8DA2BE';
+      const divMid = theme === 'light' ? '#E7E2DA' : '#26211D';
+      const divWarm = theme === 'light' ? '#C2410C' : '#F4631E';
       const scale = d3
         .scaleLinear<string>()
         .domain([-2.5, 0, 2.5])
@@ -79,13 +89,10 @@ export function CalendarHeatmap({
     }
 
     const interpolator =
-      colorRamp === 'cividis'
-        ? d3.interpolateCividis
-        : theme === 'light'
-          ? d3.interpolateYlOrRd
-          : d3.interpolateInferno;
+      colorRamp === 'cividis' ? d3.interpolateCividis : (t: number) => fireColor(t, theme);
 
-    const scale = d3.scaleSequential(interpolator).domain([0, maxV]).clamp(true);
+    // Square-root scale: fire counts are skewed, so a linear scale would paint most months the same.
+    const scale = d3.scaleSequentialSqrt(interpolator).domain([0, maxV]).clamp(true);
     return {
       maxVal: maxV,
       maxAnnual: maxA,
@@ -108,6 +115,11 @@ export function CalendarHeatmap({
   const svgW = margin.left + gridW + annualGap + annualBarMaxW + margin.right + 56;
   const svgH = margin.top + years.length * (cellH + gap) + margin.bottom;
 
+  const latestYear = years[years.length - 1];
+  const latestMonth = summary.calendar.cells.reduce(
+    (m, c) => (c.year === latestYear && c.month > m ? c.month : m),
+    1
+  );
   const idx2012 = years.indexOf(2012);
   const cliffY = idx2012 > 0 ? margin.top + idx2012 * (cellH + gap) - gap / 2 : null;
 
@@ -149,7 +161,7 @@ export function CalendarHeatmap({
       >
         <div>
           <div className="section-kicker" style={{ marginBottom: 4 }}>
-            25-YEAR BURNING CALENDAR · {summary.area.label}
+            BURNING CALENDAR {years[0]}–{latestYear} · {summary.area.label}
           </div>
           <h2
             id="calendar-heatmap-heading"
@@ -162,7 +174,7 @@ export function CalendarHeatmap({
               color: 'var(--text-primary)',
             }}
           >
-            Monthly fire activity across MODIS (2000–2011) &amp; VIIRS (2012–2026)
+            Every month since {years[0]}, on one scale
           </h2>
         </div>
 
@@ -229,11 +241,11 @@ export function CalendarHeatmap({
       >
         <span>
           {viewMode === 'harm' &&
-            'Harmonized VIIRS-equivalent counts (industrial flares removed, MODIS scaled via country × month k). Click any month to inspect it on the map.'}
+            'Vegetation-fire hotspot-days in VIIRS units: industry and gas flares removed, MODIS years (before 2012) scaled per country and month. Click a month to see it on the map.'}
           {viewMode === 'raw' &&
-            'Uncalibrated archive counts before IGNIS harmonization — notice the artificial 3–5× jump at 2012 and industrial flare persistence.'}
+            'Every raw detection from every satellite, industry and flares included. The jump at 2012 is the sensor change, not more fire.'}
           {viewMode === 'anom' &&
-            `Standardized monthly departure (z-score) against the ${summary.baselineStart}–${summary.baselineEnd} baseline window.`}
+            `How far each month sits from its own ${summary.baselineStart}–${summary.baselineEnd} normal, in standard deviations.`}
         </span>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -250,11 +262,7 @@ export function CalendarHeatmap({
               background:
                 viewMode === 'anom'
                   ? `linear-gradient(90deg, var(--div-cool), var(--neutral-mid), var(--div-warm))`
-                  : colorRamp === 'cividis'
-                    ? 'linear-gradient(90deg, #00204d, #575c6d, #a69d75, #ffea46)'
-                    : theme === 'light'
-                      ? 'linear-gradient(90deg, #ffffcc, #fd8d3c, #e31a1c, #800026)'
-                      : 'linear-gradient(90deg, #09090b, #781c6d, #ed6925, #fcffa4)',
+                  : rampGradientCss(colorRamp === 'cividis' ? CIVIDIS_STOPS : FIRE_STOPS[theme]),
             }}
           />
           <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -264,13 +272,13 @@ export function CalendarHeatmap({
       </div>
 
       {displayMode === 'chart' ? (
-        <div style={{ width: '100%', overflowX: 'auto' }}>
+        <div style={{ width: '100%', overflowX: 'auto' }} tabIndex={-1}>
           <svg
             ref={resolvedSvgRef}
             viewBox={`0 0 ${svgW} ${svgH}`}
             style={{ width: '100%', minWidth: 680, height: 'auto', display: 'block' }}
             role="grid"
-            aria-label={`25-year fire calendar heatmap for ${summary.area.label}`}
+            aria-label={`Fire calendar heatmap, ${years[0]} to ${latestYear}, for ${summary.area.label}`}
           >
             <defs>
               <pattern
@@ -285,7 +293,8 @@ export function CalendarHeatmap({
                   y1="0"
                   x2="0"
                   y2="6"
-                  stroke="rgba(255,255,255,0.34)"
+                  stroke="var(--text-primary)"
+                  strokeOpacity={0.4}
                   strokeWidth="1.5"
                 />
               </pattern>
@@ -337,9 +346,9 @@ export function CalendarHeatmap({
                     x={margin.left - 10}
                     y={rowY + cellH / 2 + 4}
                     textAnchor="end"
-                    fill={year === 2026 ? 'var(--accent)' : 'var(--text-secondary)'}
+                    fill={year === latestYear ? 'var(--accent)' : 'var(--text-secondary)'}
                     fontSize={11}
-                    fontWeight={year === 2026 || year === 2012 ? 700 : 500}
+                    fontWeight={year === latestYear || year === 2012 ? 700 : 500}
                     fontFamily="var(--font-mono)"
                   >
                     {year}
@@ -374,9 +383,9 @@ export function CalendarHeatmap({
                       <g key={key}>
                         <rect
                           data-cell={key}
-                          tabIndex={year === 2026 && month === 11 ? 0 : -1}
+                          tabIndex={year === latestYear && month === latestMonth ? 0 : -1}
                           role="gridcell"
-                          aria-label={`${MONTH_FULL[month - 1]} ${year}: ${fmtNum(cell.harmonized)} harmonized hotspots`}
+                          aria-label={`${MONTH_FULL[month - 1]} ${year}: ${fmtNum(cell.harmonized)} harmonized hotspot-days`}
                           x={cellX}
                           y={rowY}
                           width={cellW}
@@ -386,7 +395,7 @@ export function CalendarHeatmap({
                           stroke={
                             isSelected || isFocused
                               ? 'var(--accent)'
-                              : 'rgba(255,255,255,0.04)'
+                              : 'var(--surface-1)'
                           }
                           strokeWidth={isSelected || isFocused ? 2 : 0.6}
                           style={{ cursor: 'pointer' }}
@@ -404,18 +413,18 @@ export function CalendarHeatmap({
                                   color: 'var(--series-2)',
                                 },
                                 {
-                                  label: 'Raw archive',
+                                  label: 'Raw detections',
                                   value: fmtNum(cell.raw),
                                   color: 'var(--series-1)',
                                 },
                                 {
-                                  label: 'Baseline anomaly',
+                                  label: 'Vs. normal',
                                   value: `${cell.anomaly >= 0 ? '+' : ''}${cell.anomaly.toFixed(1)}% (${cell.zScore >= 0 ? '+' : ''}${cell.zScore.toFixed(2)}σ)`,
                                 },
                               ],
                               note: cell.provisional
-                                ? 'Provisional near-real-time (NRT) VIIRS stream'
-                                : 'Click cell to inspect this month on map',
+                                ? 'Provisional or partial month'
+                                : 'Click to show this month on the map',
                             })
                           }
                           onMouseLeave={() => onHoverTooltip(null)}
@@ -498,11 +507,11 @@ export function CalendarHeatmap({
             <g transform={`translate(${margin.left}, ${svgH - 8})`}>
               <rect x={0} y={-9} width={10} height={10} rx={2} fill="var(--series-1)" />
               <text x={15} y={0} fill="var(--text-muted)" fontSize={10.5} fontFamily="var(--font-mono)">
-                MODIS Era (2000–2011)
+                MODIS era (2000–2011)
               </text>
               <rect x={165} y={-9} width={10} height={10} rx={2} fill="var(--series-2)" />
               <text x={180} y={0} fill="var(--text-muted)" fontSize={10.5} fontFamily="var(--font-mono)">
-                VIIRS Era (2012–2026)
+                VIIRS era (2012–{latestYear})
               </text>
               <rect
                 x={335}
@@ -515,7 +524,7 @@ export function CalendarHeatmap({
               />
               <rect x={335} y={-9} width={10} height={10} rx={2} fill="url(#ignis-hatch)" />
               <text x={350} y={0} fill="var(--text-muted)" fontSize={10.5} fontFamily="var(--font-mono)">
-                Hatched = Provisional 2026 NRT
+                Hatched = provisional / partial month
               </text>
             </g>
           </svg>

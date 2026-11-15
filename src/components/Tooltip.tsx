@@ -36,10 +36,11 @@ export function Tooltip({ tooltip, extra }: TooltipProps) {
         maxWidth: 260,
         padding: '10px 12px',
         borderRadius: 12,
-        background: 'rgba(9, 9, 11, 0.90)',
-        backdropFilter: 'blur(16px) saturate(180%)',
-        border: '1px solid rgba(255, 255, 255, 0.14)',
-        color: '#FAFAFA',
+        background: 'color-mix(in srgb, var(--surface-1) 94%, transparent)',
+        backdropFilter: 'blur(16px) saturate(160%)',
+        border: '1px solid var(--border-strong)',
+        boxShadow: 'var(--shadow-pop)',
+        color: 'var(--text-primary)',
       }}
     >
       <div
@@ -47,8 +48,8 @@ export function Tooltip({ tooltip, extra }: TooltipProps) {
           fontSize: 12,
           fontWeight: 700,
           marginBottom: 6,
-          color: '#FAFAFA',
-          borderBottom: '1px solid rgba(255,255,255,0.1)',
+          color: 'var(--text-primary)',
+          borderBottom: '1px solid var(--border)',
           paddingBottom: 5,
         }}
       >
@@ -66,7 +67,7 @@ export function Tooltip({ tooltip, extra }: TooltipProps) {
               fontSize: 11,
             }}
           >
-            <span style={{ color: '#A1A1AA', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               {line.color && (
                 <span
                   style={{
@@ -80,7 +81,7 @@ export function Tooltip({ tooltip, extra }: TooltipProps) {
               )}
               {line.label}
             </span>
-            <span className="font-mono" style={{ fontWeight: 600, color: '#FAFAFA' }}>
+            <span className="font-mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
               {line.value}
             </span>
           </div>
@@ -91,9 +92,9 @@ export function Tooltip({ tooltip, extra }: TooltipProps) {
           style={{
             marginTop: 6,
             paddingTop: 5,
-            borderTop: '1px solid rgba(255,255,255,0.08)',
-            fontSize: 10,
-            color: '#F59E0B',
+            borderTop: '1px solid var(--border)',
+            fontSize: 10.5,
+            color: 'var(--accent)',
             fontFamily: 'var(--font-mono)',
           }}
         >

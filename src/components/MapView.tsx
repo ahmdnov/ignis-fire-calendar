@@ -120,7 +120,7 @@ export function MapView({
               id: 'background',
               type: 'background',
               paint: {
-                'background-color': theme === 'light' ? '#F4F4F5' : '#09090B',
+                'background-color': theme === 'light' ? '#FAF7F2' : '#09090B',
               },
             },
             {
@@ -201,7 +201,7 @@ export function MapView({
         type: 'fill',
         source: 'draw-preview',
         paint: {
-          'fill-color': '#38BDF8',
+          'fill-color': '#FDE68A',
           'fill-opacity': 0.18,
         },
       });
@@ -210,7 +210,7 @@ export function MapView({
         type: 'line',
         source: 'draw-preview',
         paint: {
-          'line-color': '#38BDF8',
+          'line-color': '#FDE68A',
           'line-width': 2,
           'line-dasharray': [3, 2],
         },
@@ -241,11 +241,11 @@ export function MapView({
             ['linear'],
             ['get', 'harmonizedCount'],
             1,
-            '#F59E0B',
+            '#D9670B',
             18,
-            '#F97316',
+            '#F08C12',
             45,
-            '#EF4444',
+            '#FFCB5C',
           ],
           'circle-opacity': 0.28,
           'circle-blur': 0.6,
@@ -272,11 +272,11 @@ export function MapView({
             ['linear'],
             ['get', 'harmonizedCount'],
             1,
-            '#FDE68A',
+            '#D9670B',
             12,
-            '#F59E0B',
+            '#F9AE2B',
             35,
-            '#EF4444',
+            '#FFE3A1',
           ],
           'circle-opacity': 0.92,
           'circle-stroke-width': 0.6,
@@ -293,12 +293,17 @@ export function MapView({
         onHoverRef.current({
           x: e.originalEvent.clientX,
           y: e.originalEvent.clientY,
-          title: `0.01° Grid Cell (${Number(p.lat).toFixed(2)}°, ${Number(p.lon).toFixed(2)}°)`,
+          title: `Grid cell ${Number(p.lat).toFixed(2)}°, ${Number(p.lon).toFixed(2)}°`,
           lines: [
-            { label: 'Harmonized detections', value: fmtNum(Number(p.harmonizedCount)), color: '#F97316' },
-            { label: 'Raw detections', value: fmtNum(Number(p.count)) },
-            { label: 'Peak FRP', value: `${Number(p.frpMw).toFixed(1)} MW` },
-            { label: 'Sensor', value: String(p.sensor) },
+            {
+              label: 'Harmonized hotspot-days',
+              value: fmtNum(Number(p.harmonizedCount), Number(p.harmonizedCount) < 10 ? 1 : 0),
+              color: '#F08C12',
+            },
+            ...(Number.isFinite(Number(p.frpMw))
+              ? [{ label: 'Peak FRP', value: `${Number(p.frpMw).toFixed(1)} MW` }]
+              : []),
+            { label: 'Source', value: String(p.sensor) },
           ],
         });
       });
@@ -335,7 +340,7 @@ export function MapView({
       src.setTiles([getRasterTileUrl(basemap, theme, latestDate)]);
     }
     if (map.getLayer('background')) {
-      map.setPaintProperty('background', 'background-color', theme === 'light' ? '#F4F4F5' : '#09090B');
+      map.setPaintProperty('background', 'background-color', theme === 'light' ? '#FAF7F2' : '#09090B');
     }
     if (map.getLayer('countries-outline')) {
       map.setPaintProperty(
@@ -359,6 +364,23 @@ export function MapView({
 
     const hsSrc = map.getSource('hotspots') as GeoJSONSource | undefined;
     hsSrc?.setData(mapData.hotspots as GeoJSON.FeatureCollection);
+
+    // Rescale colour and size to this area and period (square-root, so a few very active cells
+    // do not flatten everything else). Same "Fire heat" stops as the calendar and the globe.
+    let top = 1;
+    for (const f of mapData.hotspots.features) top = Math.max(top, f.properties.harmonizedCount);
+    const rootTop = Math.sqrt(Math.max(4, top));
+    const v = ['sqrt', ['max', 0, ['get', 'harmonizedCount']]];
+    const scale = (a: number | string, b: number | string, c: number | string) =>
+      ['interpolate', ['linear'], v, 0, a, rootTop * 0.5, b, rootTop, c] as never;
+    try {
+      map.setPaintProperty('hotspots-core', 'circle-color', scale('#D9670B', '#F9AE2B', '#FFE3A1'));
+      map.setPaintProperty('hotspots-core', 'circle-radius', scale(2.4, 4.6, 7.5));
+      map.setPaintProperty('hotspots-glow', 'circle-color', scale('#AE4C0C', '#F08C12', '#FFCB5C'));
+      map.setPaintProperty('hotspots-glow', 'circle-radius', scale(5, 11, 19));
+    } catch {
+      // layers not ready yet
+    }
 
     const countrySrc = map.getSource('countries') as GeoJSONSource | undefined;
     countrySrc?.setData(mapData.countryOutlines as GeoJSON.FeatureCollection);
@@ -534,7 +556,7 @@ export function MapView({
 
   return (
     <section
-      className="bento-card"
+      className="map-stage"
       style={{ padding: 0, overflow: 'hidden', position: 'relative' }}
       aria-label="Interactive spatial hotspot map"
     >
@@ -543,8 +565,8 @@ export function MapView({
         data-testid="maplibre-container"
         style={{
           width: '100%',
-          height: 390,
-          background: theme === 'light' ? '#F4F4F5' : '#09090B',
+          height: 'clamp(380px, 58vh, 560px)',
+          background: theme === 'light' ? '#FAF7F2' : '#09090B',
           position: 'relative',
         }}
       />
@@ -684,14 +706,15 @@ export function MapView({
         }}
       >
         <span>
-          <span style={{ color: '#F59E0B' }}>■</span> AOI boundary
+          <span style={{ color: '#F59E0B' }}>■</span> Selected area
         </span>
         <span>
-          <span style={{ color: '#EF4444' }}>●</span> 0.01° thermal cells (
-          {mapData?.hotspots.features.length ?? 0})
+          <span style={{ color: '#F08C12' }}>●</span>{' '}
+          {fmtNum(mapData?.hotspots.features.length ?? 0)} cells with fire
+          {mapData?.cellDeg ? ` · ${mapData.cellDeg}° grid` : ''}
         </span>
         {areaInputMode === 'draw' && (
-          <span style={{ color: '#38BDF8' }}>
+          <span style={{ color: '#FDE68A' }}>
             {drawTool === 'circle' && liveRadiusKm !== null
               ? `Radius: ${liveRadiusKm} km (click to finish)`
               : drawTool === 'circle'
@@ -750,7 +773,7 @@ function FallbackSvgMap({ area, mapData }: { area: AreaSelection; mapData: MapRe
             cx={px(lon)}
             cy={py(lat)}
             r={Math.min(8, 2.5 + f.properties.harmonizedCount / 10)}
-            fill="#F97316"
+            fill="#F08C12"
             opacity={0.78}
           />
         );

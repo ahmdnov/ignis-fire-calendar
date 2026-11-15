@@ -5,7 +5,7 @@ export type DrawTool = 'polygon' | 'rectangle' | 'circle';
 export type BasemapId = 'map' | 'night' | 'truecolor';
 export type CalendarViewMode = 'harm' | 'raw' | 'anom';
 export type ColorRampId = 'fire' | 'cividis';
-export type StatusLevel = 'far_above' | 'above' | 'near' | 'below';
+export type StatusLevel = 'far_above' | 'above' | 'near' | 'below' | 'far_below' | 'no_data';
 export type GradeLevel = 'Good' | 'Fair' | 'Poor' | 'Insufficient';
 
 export type GeoJsonPolygon = {
@@ -151,6 +151,12 @@ export interface SummaryResponse {
   baselineStart: number;
   baselineEnd: number;
   latestDate: string;
+  /** false when the area has no cells in the archive (outside the covered countries) */
+  coverage?: boolean;
+  /** length of the selected window in days */
+  windowDays?: number;
+  /** next-month forecast with its track record; absent offline or outside coverage */
+  outlook?: OutlookResponse | null;
   headline: {
     status: StatusLevel;
     statusLabel: string;
@@ -161,6 +167,8 @@ export interface SummaryResponse {
     currentWindowCount: number;
     medianWindowCount: number;
     sentence: string;
+    /** years the median and percentile are measured against, e.g. "2001–2024" */
+    baselineSpan?: string;
     historyStrip: HistoryStripPoint[];
   };
   calendar: {
@@ -177,6 +185,10 @@ export interface SummaryResponse {
   seasonCurve: {
     days: SeasonCurvePoint[];
     daysOffset: number;
+    /** calendar year drawn as the 'current' line */
+    year?: number;
+    /** one-line reading of the curve */
+    note?: string;
   };
   climatology: {
     months: ClimatologyMonth[];
@@ -248,5 +260,76 @@ export interface MapResponse {
       };
     }[];
   };
+  /** grid size of the returned cells in degrees (cells are merged when an area has too many) */
+  cellDeg?: number;
   isFallback?: boolean;
+}
+
+export interface ProvinceStat {
+  id: string;
+  name: string;
+  /** harmonized hotspot-days in the window */
+  value: number;
+  /** median of the same dates in the baseline years */
+  median: number | null;
+  ratio: number | null;
+  percentile: number | null;
+  rank: number | null;
+  nYears: number;
+  status: StatusLevel;
+  statusLabel: string;
+  /** share of the country's total in the window (0..1) */
+  share: number;
+}
+
+/** Provinces of one country for one window, sorted by value (largest first). */
+export interface BreakdownResponse {
+  countryCode: string;
+  countryName: string;
+  from: string;
+  to: string;
+  baselineSpan?: string;
+  total: number;
+  unassignedShare: number;
+  provinces: ProvinceStat[];
+}
+
+/* ----------------------------------------------------------------------------- next-month outlook */
+
+export type OutlookCall = 'busier' | 'quieter' | 'unclear' | 'none';
+
+export interface OutlookNext {
+  year: number;
+  month: number;
+  label: string;
+  /** false when this calendar month is normally almost fire-free here, so nothing is forecast */
+  inSeason: boolean;
+  /** chance that the month ends above its usual (median) level, 0-1 */
+  pBusier: number;
+  call: OutlookCall;
+  sure: boolean;
+  usual: number;
+  lastMonth: { label: string; value: number; usual: number; ratio: number };
+  last12Ratio: number;
+}
+
+export interface OutlookTrackItem {
+  year: number;
+  month: number;
+  pBusier: number;
+  call: OutlookCall;
+  sure: boolean;
+  actual: number;
+  usual: number;
+  busier: boolean;
+  /** null when no call was made (no clear signal, or off season) */
+  hit: boolean | null;
+}
+
+export interface OutlookResponse {
+  next: OutlookNext | null;
+  track: OutlookTrackItem[];
+  trackSummary: { calls: number; hits: number; sureCalls: number; sureHits: number; noSignal: number; offSeason: number; fromYear: number };
+  /** back-test over all areas on years the model never saw */
+  skill: { accuracy: number; coinFlip: number; sameAsLastMonth: number; sureAccuracy: number; sureShare: number; trainedOnRaw: number; n: number; areas: number };
 }
