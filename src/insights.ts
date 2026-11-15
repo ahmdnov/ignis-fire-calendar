@@ -105,12 +105,12 @@ export function nowInsight(s: SummaryResponse): Insight {
 /* ----------------------------------------------------------------------------- 02 · where */
 
 /** A province needs enough fire before "N× its normal" means anything. */
-function judgeable(p: ProvinceStat, total: number): boolean {
+export function judgeable(p: ProvinceStat, total: number): boolean {
   return p.ratio !== null && (p.median ?? 0) > 0 && p.value >= Math.max(20, total * 0.02);
 }
 
 /** How many of the largest provinces it takes to reach half the fire. */
-function provincesForHalf(provs: ProvinceStat[]): number {
+export function provincesForHalf(provs: ProvinceStat[]): number {
   let acc = 0;
   for (let i = 0; i < provs.length; i++) {
     acc += provs[i].share;

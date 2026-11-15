@@ -41,10 +41,12 @@ import { Tooltip, type TooltipState } from './components/Tooltip';
 import { MapView } from './components/MapView';
 import { AnnualChart, Climatology, SeasonCurve } from './components/Charts';
 import { ExclusionsCard, Headline, ReportCard } from './components/Panels';
+import { actionsInsight, buildActions } from './actions';
 import { CommandBar, SectionNav, type PeriodPreset, type SectionDef } from './components/CommandBar';
 import {
   Briefing,
   StoryPager,
+  ActionList,
   OutlookCard,
   OutlookTrackCard,
   MonthsVsNormalCard,
@@ -77,6 +79,7 @@ const SECTIONS: (SectionDef & { question: string })[] = [
   { id: 'sec-year', label: 'This year', question: 'How is this year going?' },
   { id: 'sec-trend', label: 'Trend', question: 'Is it getting worse?' },
   { id: 'sec-next', label: 'Next', question: "What's likely next?" },
+  { id: 'sec-act', label: 'What to do', question: 'What should you do about it?' },
   { id: 'sec-trust', label: 'Trust', question: 'Can you trust these numbers?' },
 ];
 
@@ -391,7 +394,10 @@ export default function App() {
       breakdown.to === summary.to
         ? breakdown
         : null;
+    const actions = summary.coverage !== false && !summary.isFallback ? buildActions(summary, area, bd) : [];
     return {
+      actions,
+      act: actionsInsight(actions, area.label),
       now: nowInsight(summary),
       where: whereInsight(area, bd, mapData),
       when: whenInsight(summary),
@@ -405,10 +411,12 @@ export default function App() {
 
   // Tabs that exist for this area; an unavailable one falls back to the overview.
   const tabSections = useMemo(
-    () => (!covered || !story ? SECTIONS.slice(0, 2) : SECTIONS.filter((x) => x.id !== 'sec-next' || !!story.next)),
+    () => (!covered || !story ? SECTIONS.slice(0, 2) : SECTIONS.filter((x) => (x.id !== 'sec-next' || !!story.next) && (x.id !== 'sec-act' || !!story.act))),
     [covered, story]
   );
   const tab = tabSections.some((x) => x.id === activeSec) ? activeSec : 'sec-now';
+  /** chapter number as shown, e.g. "07": the position among the tabs this area has */
+  const num = (id: string) => String(tabSections.findIndex((x) => x.id === id) + 1).padStart(2, '0');
 
   const dataStatus = meta ? (
     <>
@@ -591,7 +599,8 @@ export default function App() {
                         { id: 'sec-year', n: '04', insight: story.year },
                         { id: 'sec-trend', n: '05', insight: story.trend },
                         ...(story.next ? [{ id: 'sec-next', n: '06', insight: story.next }] : []),
-                        { id: 'sec-trust', n: story.next ? '07' : '06', insight: story.trust },
+                        ...(story.act ? [{ id: 'sec-act', n: num('sec-act'), insight: story.act }] : []),
+                        { id: 'sec-trust', n: num('sec-trust'), insight: story.trust },
                       ]}
                     />
                   )}
@@ -765,9 +774,19 @@ export default function App() {
                         </StoryChapter>
                       )}
 
+                      {story.act && (
+                        <StoryChapter id="sec-act" n={num('sec-act')} question="What should you do about it?" insight={story.act}>
+                          <ActionList
+                            actions={story.actions}
+                            labels={Object.fromEntries(SECTIONS.map((x) => [x.id, x.label]))}
+                            onSee={scrollToSection}
+                          />
+                        </StoryChapter>
+                      )}
+
                       <StoryChapter
                         id="sec-trust"
-                        n={story.next ? '07' : '06'}
+                        n={num('sec-trust')}
                         question="Can you trust these numbers?"
                         insight={story.trust}
                         hint="the long bar shows every raw satellite detection; only the orange part is counted as fire. The report card tests the pre-2012 conversion on 2012–2017, when both satellites were flying."

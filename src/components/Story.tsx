@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { BreakdownResponse, OutlookResponse, OutlookTrackItem, SummaryResponse } from '../types';
 import type { Insight, Part } from '../insights';
+import type { Action } from '../actions';
 import { monthsVsNormal, recordMonths, topYears } from '../insights';
 import { MONTH_FULL, MONTH_NAMES, fmtNum } from '../util';
 
@@ -535,5 +536,45 @@ export function StoryPager({
         <span />
       )}
     </nav>
+  );
+}
+
+/* ----------------------------------------------------------------------------- what to do */
+
+const WHEN_ICON: Record<string, string> = { now: '!', 'next-month': '→', 'before-season': '◷', yearly: '↻', reporting: '✎' };
+
+/** What to do: one row per suggestion, with its timing, its evidence and a link to the evidence. */
+export function ActionList({ actions, labels, onSee }: { actions: Action[]; labels: Record<string, string>; onSee: (id: string) => void }) {
+  return (
+    <div className="bento-card actions">
+      <ol className="actions__list">
+        {actions.map((a, i) => (
+          <li key={i} className={`action action--${a.when}`}>
+            <div className="action__when">
+              <span className="action__icon" aria-hidden="true">
+                {WHEN_ICON[a.when]}
+              </span>
+              <span>{a.whenLabel}</span>
+            </div>
+            <div className="action__body">
+              <h3 className="action__title">{a.title}</h3>
+              <p className="action__why">
+                <span className="action__because">Because</span> <Rich parts={a.why} />
+              </p>
+              <p className="action__who">For: {a.who}</p>
+            </div>
+            <button type="button" className="action__see no-print" onClick={() => onSee(a.see)}>
+              See the evidence
+              <small>{labels[a.see] ?? ''}</small>
+              <ArrowRight size={14} aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+      </ol>
+      <p className="listcard__note">
+        A satellite hotspot is not a confirmed fire, clouds hide fires, and these suggestions do not know about weather,
+        staffing or local rules. Confirm on the ground before acting.
+      </p>
+    </div>
   );
 }

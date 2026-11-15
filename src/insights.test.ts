@@ -11,6 +11,7 @@ import {
   whenInsight,
   whereInsight,
 } from './insights';
+import { actionsInsight, buildActions } from './actions';
 import { getFallbackSummary, SHOWCASE_COUNTRIES } from './fallbackData';
 import type { AreaSelection, BreakdownResponse, MapResponse, ProvinceStat, SummaryResponse } from './types';
 
@@ -227,4 +228,43 @@ test('next: busier, too close to call, off season and missing outlook are worded
   assert.ok(off.weak);
   assert.match(text(off), /^No forecast for January 2026: January is normally almost fire-free here/);
   assert.doesNotMatch(text(off), /chance/);
+});
+
+test('actions: each suggestion follows from its evidence, and weak evidence stays silent', () => {
+  const s = withAnnual(base(), Array.from({ length: 25 }, (_, i) => 1000 + i * 100), true, 4.4);
+  s.reportCard.grade = 'Good';
+  const meds = [5, 5, 5, 5, 40, 120, 160, 140, 90, 10, 5, 5];
+  s.climatology.months = s.climatology.months.map((m, i) => ({ ...m, median: meds[i] }));
+  s.exclusions = { excludedPct: 87, totalRaw: 1000, keptVegetation: 130, gasFlares: 800, staticIndustrial: 40, lowConfidence: 20, volcanic: 10 };
+  s.outlook = {
+    next: { year: 2026, month: 1, label: 'January 2026', inSeason: true, pBusier: 0.78, call: 'busier', sure: true, usual: 370,
+      lastMonth: { label: 'December 2025', value: 500, usual: 267, ratio: 1.87 }, last12Ratio: 1.6 },
+    track: [], trackSummary: { calls: 0, hits: 0, sureCalls: 0, sureHits: 0, noSignal: 0, offSeason: 0, fromYear: 2024 },
+    skill: { accuracy: 0.725, coinFlip: 0.511, sameAsLastMonth: 0.722, sureAccuracy: 0.849, sureShare: 0.43, trainedOnRaw: 0.565, n: 1, areas: 1 },
+  };
+  const bd: BreakdownResponse = {
+    countryCode: area.countryCode!, countryName: 'Iraq', from: '2025-01-01', to: '2025-12-31', total: 1000, unassignedShare: 0,
+    provinces: [prov('p:A', 'Maysan', 600, 0.6, 150, 4.0), prov('p:B', 'Basra', 396, 0.396, 300, 1.3), prov('p:C', 'Tiny', 4, 0.004, 0.5, 8.0)],
+  };
+  const acts = buildActions(s, area, bd);
+  const titles = acts.map((a) => a.title);
+  assert.ok(titles.includes('Send inspectors to Maysan first')); // not "Tiny": 8x on 4 hotspot-days is not evidence
+  assert.ok(titles.includes('Put most crews and patrols in Maysan'));
+  assert.ok(titles.includes('Add capacity for January 2026'));
+  assert.ok(titles.includes('Have crews, equipment and burning-ban notices ready by the end of May')); // season Jun-Sep
+  assert.ok(titles.includes('Budget for more fire each year, not for the past average'));
+  assert.ok(titles.includes('Quote these filtered numbers, never raw satellite fire counts'));
+  assert.deepEqual(acts.map((a) => a.when), [...acts.map((a) => a.when)].sort((x, y) => ['now', 'next-month', 'before-season', 'yearly', 'reporting'].indexOf(x) - ['now', 'next-month', 'before-season', 'yearly', 'reporting'].indexOf(y)));
+  assert.match(partsToText(actionsInsight(acts, 'Iraq')!.parts), /confirm on the ground before acting/);
+
+  // Unreliable early record: no trend advice, no "above its own normal" advice, and a reporting caution instead.
+  s.reportCard.grade = 'Poor';
+  const poor = buildActions(s, area, bd).map((a) => a.title);
+  assert.ok(!poor.some((t) => /Budget for|Send inspectors/.test(t)));
+  assert.ok(poor.includes('Make long-term comparisons from 2012 onward only'));
+
+  // Too little fire: one honest line instead of a plan.
+  const tiny = withAnnual(base(), Array.from({ length: 25 }, () => 3), false, 0);
+  tiny.exclusions = { ...tiny.exclusions, totalRaw: 0, gasFlares: 0, staticIndustrial: 0 };
+  assert.deepEqual(buildActions(tiny, area, null).map((a) => a.title), ['Do not build a fire plan on these numbers alone']);
 });
